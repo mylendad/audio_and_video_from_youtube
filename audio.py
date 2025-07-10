@@ -13,12 +13,14 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram import Bot, Dispatcher, types
 
+import glob
 from yt_dlp import YoutubeDL
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from cookies.updater import export_youtube_cookies_to_txt
 
+from redis_lock import acquire_user_lock, release_user_lock
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from clients.async_user_actioner import AsyncUserActioner
 from clients.pg_client import AsyncPostgresClient
@@ -126,6 +128,10 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         await message.answer("Неподдерживаемый формат.")
         return
 
+    if not acquire_user_lock(user_id):
+        await message.answer("У вас уже выполняется загрузка. Пожалуйста, подождите.")
+        return
+
     try:
         await user_actioner.update_date(user_id, datetime.now(timezone.utc))
     except Exception as e:
@@ -157,35 +163,50 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
     try:
         with YoutubeDL(ydl_opts) as ydl:
             info = await asyncio.to_thread(ydl.extract_info, url)
-            final_path = ydl.prepare_filename(info)
+
+            if 'requested_downloads' in info and info['requested_downloads']:
+                ext = info['requested_downloads'][0]['ext']
+            else:
+                ext = info.get('ext', 'mp4')
+
+            expected_file = f"{base_filename}.{ext}"
+            candidates = glob.glob(f"{base_filename}*")
+            final_path = next((f for f in candidates if f.endswith(ext)), expected_file)
 
         if not os.path.exists(final_path):
-            raise FileNotFoundError("Файл не найден после скачивания")
+            raise FileNotFoundError(f"Файл не найден после скачивания: {final_path}")
 
         file_size = os.path.getsize(final_path)
 
         if file_size > MAX_TELEGRAM_SIZE:
+            from googleapiclient.http import MediaFileUpload
+
             file_metadata = {'name': os.path.basename(final_path), 'parents': [GDRIVE_FOLDER_ID]}
             media = MediaFileUpload(final_path, resumable=True)
             file = service.files().create(body=file_metadata, media_body=media, fields='id,webViewLink').execute()
-            service.permissions().create(body={"role": "reader", "type": "anyone"}, fileId=file.get("id")).execute()
-            await message.answer(f"Файл слишком большой для Telegram.\nСкачать с Google Drive: {file.get('webViewLink')}")
+            service.permissions().create(body={"role": "reader", "type": "anyone"}, fileId=file["id"]).execute()
+            await message.answer(f"Файл слишком большой для Telegram.\nСкачать с Google Drive: {file['webViewLink']}")
         else:
             fs_file = types.FSInputFile(final_path)
             if format_config['send_method'] == 'send_audio':
                 await message.answer_audio(fs_file)
             elif format_config['send_method'] == 'send_video':
                 await message.answer_video(fs_file)
+            else:
+                await message.answer_document(fs_file)
 
     except Exception as e:
         logger.error(f"Ошибка при скачивании/отправке: {e}")
         await message.answer(f"Произошла ошибка: {str(e)}")
+
     finally:
+        release_user_lock(user_id)
         if final_path and os.path.exists(final_path):
             try:
                 os.remove(final_path)
             except Exception as e:
                 logger.warning(f"Ошибка при удалении {final_path}: {e}")
+
 
 @dp.message(Command("refresh_cookies"))
 async def refresh_cookies_handler(message: types.Message):
