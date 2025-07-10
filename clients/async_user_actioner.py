@@ -1,48 +1,3 @@
-# from datetime import date
-# from clients.sqlite3_client import AsyncPostgresClient
-
-# import logging
-
-# GET_USER = """
-#     SELECT user_id, username, chat_id, last_updated_date FROM users WHERE user_id = $1;
-# """
-
-# INSERT_USER = """
-#     INSERT INTO users (user_id, username, chat_id, last_updated_date)
-#     VALUES ($1, $2, $3, $4)
-#     ON CONFLICT (user_id) DO NOTHING;
-# """
-
-# UPDATE_DATE = """
-#     UPDATE users SET last_updated_date = $1 WHERE user_id = $2;
-# """
-
-# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-# logger = logging.getLogger(__name__)
-
-# class AsyncUserActioner:
-#     def __init__(self, db: AsyncPostgresClient):
-#         self.db = db
-
-#     async def get_user(self, user_id: int):
-#         result = await self.db.fetch(GET_USER, (user_id,))
-#         # return result[0] if result else None
-#         if not result:
-#             return None
-#         return dict(result[0])
-
-
-#     # async def create_user(self, user_id: int, username: str, chat_id: int, last_updated_date: int):
-#     #     await self.db.execute(INSERT_USER, (user_id, username, chat_id, last_updated_date))
-    
-#     async def create_user(self, user_id: int, username: str, chat_id: int, last_updated_date: int):
-#         logger.info(f"Создание пользователя: {user_id}, {username}, {chat_id}, {last_updated_date}")
-#         await self.db.execute(INSERT_USER, (user_id, username, chat_id, last_updated_date))
-
-#     async def update_date(self, user_id: int, update_date: int):
-#         await self.db.execute(UPDATE_DATE, (update_date, user_id))
-
-
 from datetime import datetime
 from typing import Optional, Dict, Any
 from clients.pg_client import AsyncPostgresClient
@@ -83,10 +38,10 @@ class AsyncUserActioner:
         }
 
     async def create_user(self, user_id: int, username: str, chat_id: int, last_updated_date: datetime) -> None:
-        logger.info(f"🆕 Создание пользователя: id={user_id}, username={username}, chat_id={chat_id}")
+        logger.info(f"Создание пользователя: id={user_id}, username={username}, chat_id={chat_id}")
         await self.db.execute(INSERT_USER, (user_id, username, chat_id, int(last_updated_date.timestamp())))
 
     async def update_date(self, user_id: int, update_date: datetime) -> None:
-        logger.info(f"♻️ Обновление времени пользователя {user_id} -> {update_date.isoformat()}")
+        logger.info(f"Обновление времени пользователя {user_id} -> {update_date.isoformat()}")
         await self.db.execute(UPDATE_DATE, (int(update_date.timestamp()), user_id))
 

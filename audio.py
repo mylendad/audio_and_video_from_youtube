@@ -1,64 +1,41 @@
 import os
 import asyncio
-import logging
 # from datetime import datetime, date
 from datetime import datetime, timezone
-
 from envparse import Env
+import browser_cookie3
+import logging
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram import Bot, Dispatcher, types
 
 from yt_dlp import YoutubeDL
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-
-from clients.async_user_actioner import AsyncUserActioner
-from clients.pg_client import AsyncPostgresClient
-
-import browser_cookie3
-
-import logging
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from cookies.updater import export_youtube_cookies_to_txt
 
-from aiogram import Bot, Dispatcher, types
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from clients.async_user_actioner import AsyncUserActioner
+from clients.pg_client import AsyncPostgresClient
 
 env = Env()
 env.read_envfile()
 
 TOKEN = env.str("TOKEN")
 ADMIN_CHAT_ID = env.int("ADMIN_CHAT_ID")
-COOKIE_FILE = 'www.youtube.com_cookies.txt'
-SERVICE_ACCOUNT_FILE = 'key.json'
-GDRIVE_FOLDER_ID = '1g00BTQOPGSgdCZXwo-uNtawbCVeJtLYz'
+COOKIE_FILE = "www.youtube.com_cookies.txt"
+SERVICE_ACCOUNT_FILE = "key.json"
+GDRIVE_FOLDER_ID = env.str("GDRIVE_FOLDER_ID")
 SCOPES = ['https://www.googleapis.com/auth/drive']
-ADMIN_USER_ID = 458073613
+ADMIN_USER_ID = env.int("ADMIN_USER_ID")
 
-MAX_TELEGRAM_SIZE = 50 * 1024 * 1024
-REQUIRED_CHANNELS = ["@mosnoow"]
-
-credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-service = build('drive', 'v3', credentials=credentials)
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
-
-db = AsyncPostgresClient(dsn=env.str("DB_DSN"))
-user_actioner = AsyncUserActioner(db)
-
-class DownloadState(StatesGroup):
-    waiting_for_format = State()
+MAX_TELEGRAM_SIZE = 50 * 1024 * 1024 # 50 MB
+REQUIRED_CHANNELS = env.str("REQUIRED_CHANNELS")
 
 FORMATS = {
     'mp3': {
@@ -101,6 +78,21 @@ FORMATS = {
         'send_method': 'send_video'
     },
 }
+
+credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+service = build('drive', 'v3', credentials=credentials)
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+
+db = AsyncPostgresClient(dsn=env.str("DB_DSN"))
+user_actioner = AsyncUserActioner(db)
+
+class DownloadState(StatesGroup):
+    waiting_for_format = State()
 
 def schedule_cookie_update(scheduler: AsyncIOScheduler):
     logger.info("Настраиваем автообновление cookies...")
