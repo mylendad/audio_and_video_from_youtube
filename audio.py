@@ -1,6 +1,6 @@
 import os
 import asyncio
-# from datetime import datetime, date
+
 from datetime import datetime, timezone
 from envparse import Env
 import browser_cookie3
@@ -37,7 +37,7 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 ADMIN_USER_ID = env.int("ADMIN_USER_ID")
 
 MAX_TELEGRAM_SIZE = 50 * 1024 * 1024 # 50 MB
-REQUIRED_CHANNELS = env.str("REQUIRED_CHANNELS")
+REQUIRED_CHANNELS = env.list("REQUIRED_CHANNELS", default=[])
 
 FORMATS = {
     'mp3': {
@@ -95,6 +95,14 @@ user_actioner = AsyncUserActioner(db)
 
 class DownloadState(StatesGroup):
     waiting_for_format = State()
+    
+async def ensure_user_exists(message: types.Message) -> bool:
+    user = await user_actioner.get_user(message.from_user.id)
+    if user is None:
+        await message.answer("Вы не авторизованы. Пожалуйста, отправьте /start.")
+        return False
+    return True
+
 
 def schedule_cookie_update(scheduler: AsyncIOScheduler):
     logger.info("Настраиваем автообновление cookies...")
@@ -118,6 +126,9 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
 
     user_data = await state.get_data()
     url = user_data.get("last_url")
+    
+    if not await ensure_user_exists(message):
+        return
 
     if not url:
         await message.answer("Сначала отправьте ссылку на видео.")
@@ -154,6 +165,7 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         'noprogress': False,
         'verbose': True,
         'cookiefile': COOKIE_FILE,
+        'verbose': True,
         'proxy': 'socks5://127.0.0.1:9050',
     }
 
