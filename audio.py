@@ -37,7 +37,8 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 ADMIN_USER_ID = env.int("ADMIN_USER_ID")
 
 MAX_TELEGRAM_SIZE = 50 * 1024 * 1024 # 50 MB
-REQUIRED_CHANNELS = env.list("REQUIRED_CHANNELS", default=[])
+REQUIRED_CHANNELS = [ch for ch in env.list("REQUIRED_CHANNELS", default=['@mosco']) if ch]
+# REQUIRED_CHANNELS = ['@mosco']
 
 FORMATS = {
     'mp3': {
@@ -95,14 +96,32 @@ user_actioner = AsyncUserActioner(db)
 
 class DownloadState(StatesGroup):
     waiting_for_format = State()
-    
-async def ensure_user_exists(message: types.Message) -> bool:
-    user = await user_actioner.get_user(message.from_user.id)
-    if user is None:
-        await message.answer("Вы не авторизованы. Пожалуйста, отправьте /start.")
-        return False
-    return True
 
+async def ensure_user_exists(message_or_query: types.Message | types.CallbackQuery) -> bool:
+    user_id = message_or_query.from_user.id
+    user = await user_actioner.get_user(user_id)
+    
+    if user is not None:
+        return True
+        
+    if await is_user_subscribed(user_id):
+        username = message_or_query.from_user.username or ""
+        chat_id = message_or_query.message.chat.id if isinstance(message_or_query, types.CallbackQuery) else message_or_query.chat.id
+        now = datetime.now(timezone.utc)
+        
+        try:
+            await user_actioner.create_user(user_id, username, chat_id, now)
+            logger.info(f"Авторегистрация пользователя: {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка авторегистрации {user_id}: {e}")
+
+    if isinstance(message_or_query, types.CallbackQuery):
+        await message_or_query.message.answer("Для использования бота:\n1. Подпишитесь на каналы\n2. Нажмите /start")
+    else:
+        await message_or_query.answer("Для использования бота:\n1. Подпишитесь на каналы\n2. Нажмите /start")
+        
+    return False
 
 def schedule_cookie_update(scheduler: AsyncIOScheduler):
     logger.info("Настраиваем автообновление cookies...")
@@ -124,11 +143,11 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
     user_id = message.from_user.id
     chat_id = message.chat.id
 
-    user_data = await state.get_data()
-    url = user_data.get("last_url")
-    
     if not await ensure_user_exists(message):
         return
+
+    user_data = await state.get_data()
+    url = user_data.get("last_url")
 
     if not url:
         await message.answer("Сначала отправьте ссылку на видео.")
@@ -140,7 +159,7 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         return
 
     if not acquire_user_lock(user_id):
-        await message.answer("У вас уже выполняется загрузка. Пожалуйста, подождите.")
+        await message.answer("⏳ У вас уже выполняется загрузка. Пожалуйста, подождите.")
         return
 
     try:
@@ -165,7 +184,6 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         'noprogress': False,
         'verbose': True,
         'cookiefile': COOKIE_FILE,
-        'verbose': True,
         'proxy': 'socks5://127.0.0.1:9050',
     }
 
@@ -218,6 +236,22 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
                 os.remove(final_path)
             except Exception as e:
                 logger.warning(f"Ошибка при удалении {final_path}: {e}")
+                
+@dp.callback_query()
+async def handle_callback(callback: types.CallbackQuery, state: FSMContext):
+    if not await ensure_user_exists(callback):
+        await callback.answer()
+        return
+
+    data = callback.data
+    user_id = callback.from_user.id
+
+    if data.startswith("format:"):
+        format_key = data.split(":", 1)[1]
+        await process_download(callback.message, format_key, state)
+        await callback.answer()
+    else:
+        await callback.answer("Неизвестная команда.")
 
 
 @dp.message(Command("refresh_cookies"))
@@ -233,6 +267,7 @@ async def refresh_cookies_handler(message: types.Message):
     else:
         await message.answer("Не удалось обновить cookies. Проверь лог.")
 
+
 @dp.message(Command("start"))
 async def start_command(message: types.Message):
     user_id = message.from_user.id
@@ -240,32 +275,48 @@ async def start_command(message: types.Message):
     chat_id = message.chat.id
     now = datetime.now(timezone.utc)
 
-    if not await is_user_subscribed(user_id):
-        buttons = [types.InlineKeyboardButton(text="Подписаться", url=f"https://t.me/{ch[1:]}") for ch in REQUIRED_CHANNELS]
-        markup = types.InlineKeyboardMarkup(inline_keyboard=[[b] for b in buttons])
-        await message.answer("Чтобы пользоваться ботом, подпишитесь на каналы:", reply_markup=markup)
+    try:
+        user = await user_actioner.get_user(user_id)
+        if not user:
+            await user_actioner.create_user(user_id, username, chat_id, now)
+            logger.info(f"Новый пользователь: {user_id}")
+        else:
+            await user_actioner.update_date(user_id, now)
+            logger.info(f"Обновлен пользователь: {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка регистрации {user_id}: {e}")
+        await message.answer("Ошибка регистрации. Попробуйте позже.")
         return
 
-    try:
-        await user_actioner.create_user(user_id, username, chat_id, now)
-    except Exception as e:
-        logger.warning(f"Ошибка при создании пользователя {user_id}: {e}")
+    if not await is_user_subscribed(user_id):
+        buttons = [
+            types.InlineKeyboardButton(text="Подписаться", url=f"https://t.me/{ch[1:]}")
+            for ch in REQUIRED_CHANNELS
+        ]
+        markup = types.InlineKeyboardMarkup(inline_keyboard=[[b] for b in buttons])
+        await message.answer("Подпишитесь на каналы:", reply_markup=markup)
+        return
 
-    await message.answer(f"Привет, {message.from_user.first_name}!\nЯ бот для скачивания видео с YouTube. Просто отправь мне ссылку на видео 🎥.")
+    await message.answer(f"Привет, {message.from_user.first_name}!\nОтправь ссылку на видео или аудио.")
 
-@dp.message(Command("update_cookies"))
+
+dp.message(Command("update_cookies"))
 async def update_cookies_command(message: types.Message):
-    if message.from_user.id != ADMIN_CHAT_ID:
+    if message.from_user.id != ADMIN_USER_ID:
         await message.answer("Доступ запрещён.")
         return
 
     try:
-        cj = browser_cookie3.chrome(domain_name='youtube.com')
-        cj.save(COOKIE_FILE, ignore_discard=True, ignore_expires=True)
-        await message.answer("Cookies обновлены успешно.")
+        from generate_cookies import export_youtube_cookies_to_txt
+        success = export_youtube_cookies_to_txt()
+        
+        if success:
+            await message.answer("Cookies успешно обновлены.")
+        else:
+            await message.answer("Не удалось обновить cookies. Проверьте логи сервера.")
     except Exception as e:
         logger.error(f"Ошибка при обновлении cookies: {e}")
-        await message.answer(f"Не удалось обновить cookies: {e}")
+        await message.answer(f"Критическая ошибка: {str(e)}")
 
 @dp.message(F.text.regexp(r'https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w\-]+'))
 async def handle_video_link(message: types.Message, state: FSMContext):
@@ -294,8 +345,6 @@ async def main():
         await dp.start_polling(bot)
     finally:
         await db.close()
-
-
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

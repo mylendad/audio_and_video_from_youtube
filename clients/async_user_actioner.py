@@ -27,7 +27,7 @@ class AsyncUserActioner:
     async def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
         result = await self.db.fetch(GET_USER, (user_id,))
         if not result:
-            logger.info(f"🔍 Пользователь {user_id} не найден")
+            logger.info(f"Пользователь {user_id} не найден")
             return None
         row = result[0]
         return {
@@ -38,8 +38,13 @@ class AsyncUserActioner:
         }
 
     async def create_user(self, user_id: int, username: str, chat_id: int, last_updated_date: datetime) -> None:
-        logger.info(f"Создание пользователя: id={user_id}, username={username}, chat_id={chat_id}")
-        await self.db.execute(INSERT_USER, (user_id, username, chat_id, int(last_updated_date.timestamp())))
+        logger.info(f"Создание пользователя: id={user_id}")
+        await self.db.execute(INSERT_USER, (
+            user_id, 
+            username, 
+            chat_id, 
+            int(last_updated_date.timestamp())
+    ))
 
     async def update_date(self, user_id: int, update_date: datetime) -> None:
         logger.info(f"Обновление времени пользователя {user_id} -> {update_date.isoformat()}")
