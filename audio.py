@@ -37,8 +37,7 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 ADMIN_USER_ID = env.int("ADMIN_USER_ID")
 
 MAX_TELEGRAM_SIZE = 50 * 1024 * 1024 # 50 MB
-REQUIRED_CHANNELS = [ch for ch in env.list("REQUIRED_CHANNELS", default=['@mosco']) if ch]
-# REQUIRED_CHANNELS = ['@mosco']
+REQUIRED_CHANNELS = [ch for ch in env.list("REQUIRED_CHANNELS", default=[]) if ch]
 
 FORMATS = {
     'mp3': {
@@ -97,6 +96,25 @@ user_actioner = AsyncUserActioner(db)
 class DownloadState(StatesGroup):
     waiting_for_format = State()
 
+async def send_subscription_request(chat_id: int):
+    buttons = []
+    for channel in REQUIRED_CHANNELS:
+        buttons.append(types.InlineKeyboardButton(
+            text=f"Подписаться на {channel}", 
+            url=f"https://t.me/{channel[1:]}"
+        ))
+    buttons.append(types.InlineKeyboardButton(
+        text="Я подписался", 
+        callback_data="check_subscription_callback"
+    ))
+    markup = types.InlineKeyboardMarkup(inline_keyboard=[buttons])
+    await bot.send_message(
+        chat_id, 
+        "Для использования бота необходимо подписаться на каналы:", 
+        reply_markup=markup
+    )
+
+
 async def ensure_user_exists(message_or_query: types.Message | types.CallbackQuery) -> bool:
     user_id = message_or_query.from_user.id
     user = await user_actioner.get_user(user_id)
@@ -128,7 +146,12 @@ def schedule_cookie_update(scheduler: AsyncIOScheduler):
     scheduler.add_job(export_youtube_cookies_to_txt, trigger="interval", hours=12, id="update_cookies")
     logger.info("Планировщик cookies активирован")
 
+
+
 async def is_user_subscribed(user_id: int) -> bool:
+    if not REQUIRED_CHANNELS: 
+        return True
+        
     for channel in REQUIRED_CHANNELS:
         try:
             member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
@@ -144,6 +167,12 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
     chat_id = message.chat.id
 
     if not await ensure_user_exists(message):
+        return
+    
+    if not await is_user_subscribed(user_id):
+        await message.answer("Для скачивания необходимо подписаться на каналы.")
+        await send_subscription_request(message.chat.id)
+        release_user_lock(user_id)
         return
 
     user_data = await state.get_data()
@@ -236,22 +265,24 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
                 os.remove(final_path)
             except Exception as e:
                 logger.warning(f"Ошибка при удалении {final_path}: {e}")
-                
-@dp.callback_query()
-async def handle_callback(callback: types.CallbackQuery, state: FSMContext):
-    if not await ensure_user_exists(callback):
-        await callback.answer()
-        return
+      
+@dp.message(Command("check_subscription"))
+async def check_subscription_command(message: types.Message):
+    user_id = message.from_user.id
+    if await is_user_subscribed(user_id):
+        await message.answer("Вы подписаны на все каналы! Теперь вы можете скачивать видео.")
+    else:
+        await send_subscription_request(message.chat.id)
+          
 
-    data = callback.data
+@dp.callback_query(F.data == "check_subscription_callback")
+async def check_subscription_callback_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-
-    if data.startswith("format:"):
-        format_key = data.split(":", 1)[1]
-        await process_download(callback.message, format_key, state)
+    if await is_user_subscribed(user_id):
+        await callback.message.edit_text("Подписка подтверждена! Теперь вы можете скачивать видео.")
         await callback.answer()
     else:
-        await callback.answer("Неизвестная команда.")
+        await callback.answer("Вы ещё не подписались на все каналы!", show_alert=True)
 
 
 @dp.message(Command("refresh_cookies"))
@@ -287,15 +318,11 @@ async def start_command(message: types.Message):
         logger.error(f"Ошибка регистрации {user_id}: {e}")
         await message.answer("Ошибка регистрации. Попробуйте позже.")
         return
-
+    
     if not await is_user_subscribed(user_id):
-        buttons = [
-            types.InlineKeyboardButton(text="Подписаться", url=f"https://t.me/{ch[1:]}")
-            for ch in REQUIRED_CHANNELS
-        ]
-        markup = types.InlineKeyboardMarkup(inline_keyboard=[[b] for b in buttons])
-        await message.answer("Подпишитесь на каналы:", reply_markup=markup)
+        await send_subscription_request(message.chat.id)
         return
+
 
     await message.answer(f"Привет, {message.from_user.first_name}!\nОтправь ссылку на видео или аудио.")
 
@@ -318,8 +345,13 @@ async def update_cookies_command(message: types.Message):
         logger.error(f"Ошибка при обновлении cookies: {e}")
         await message.answer(f"Критическая ошибка: {str(e)}")
 
+
 @dp.message(F.text.regexp(r'https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w\-]+'))
 async def handle_video_link(message: types.Message, state: FSMContext):
+    if not await is_user_subscribed(message.from_user.id):
+        await message.answer("Для скачивания необходимо подписаться на каналы.")
+        await send_subscription_request(message.chat.id)
+        return
     await state.set_state(DownloadState.waiting_for_format)
     await state.update_data(last_url=message.text)
 
