@@ -1,5 +1,6 @@
 import os
 import asyncio
+import re
 
 from datetime import datetime, timezone
 from envparse import Env
@@ -10,14 +11,15 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram import Bot, Dispatcher, types
 
 import glob
+
 from yt_dlp import YoutubeDL
-from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from googleapiclient.errors import HttpError
 from cookies.updater import export_youtube_cookies_to_txt
 
 from redis_lock import acquire_user_lock, release_user_lock
@@ -25,18 +27,16 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from clients.async_user_actioner import AsyncUserActioner
 from clients.pg_client import AsyncPostgresClient
 
+
 env = Env()
 env.read_envfile()
 
 TOKEN = env.str("TOKEN")
 ADMIN_CHAT_ID = env.int("ADMIN_CHAT_ID")
+
 COOKIE_FILE = "www.youtube.com_cookies.txt"
-SERVICE_ACCOUNT_FILE = "key.json"
-GDRIVE_FOLDER_ID = env.str("GDRIVE_FOLDER_ID")
-SCOPES = ['https://www.googleapis.com/auth/drive']
 ADMIN_USER_ID = env.int("ADMIN_USER_ID")
 
-MAX_TELEGRAM_SIZE = 50 * 1024 * 1024 # 50 MB
 REQUIRED_CHANNELS = [ch for ch in env.list("REQUIRED_CHANNELS", default=[]) if ch]
 
 FORMATS = {
@@ -81,11 +81,10 @@ FORMATS = {
     },
 }
 
-credentials = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-service = build('drive', 'v3', credentials=credentials)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -95,6 +94,53 @@ user_actioner = AsyncUserActioner(db)
 
 class DownloadState(StatesGroup):
     waiting_for_format = State()
+    
+   
+def format_size(size_bytes: int) -> str:
+    if size_bytes == 0:
+        return "0 Б"
+    
+    units = ("Б", "КБ", "МБ", "ГБ")
+    i = 0
+    size = size_bytes
+    
+    while size >= 1024 and i < len(units)-1:
+        size /= 1024
+        i += 1
+        
+    return f"{size:.2f} {units[i]}"  
+    
+
+async def estimate_video_size(url: str, format_config: dict) -> int:
+    ydl_opts = {
+        'quiet': True,
+        'simulate': True,
+        'format': format_config['format'],
+        'cookiefile': COOKIE_FILE,
+        'proxy': 'socks5://127.0.0.1:9050',
+    }
+    
+    if 'postprocessors' in format_config:
+        ydl_opts['postprocessors'] = format_config['postprocessors']
+
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = await asyncio.to_thread(ydl.extract_info, url, download=False)
+            
+            if 'requested_downloads' in info and info['requested_downloads']:
+                filesize = info['requested_downloads'][0].get('filesize')
+                if filesize:
+                    return filesize
+                    
+            tbr = info.get('tbr') or 0
+            duration = info.get('duration') or 1
+            
+            estimated_size = (tbr * 1000 * duration) / 8
+            return int(estimated_size)
+            
+    except Exception as e:
+        logger.error(f"Ошибка оценки размера: {e}")
+        return 0
 
 async def send_subscription_request(chat_id: int):
     buttons = []
@@ -107,7 +153,14 @@ async def send_subscription_request(chat_id: int):
         text="Я подписался", 
         callback_data="check_subscription_callback"
     ))
-    markup = types.InlineKeyboardMarkup(inline_keyboard=[buttons])
+    
+    markup = types.InlineKeyboardMarkup(
+    inline_keyboard=[
+        [types.InlineKeyboardButton(...)]
+        for channel in REQUIRED_CHANNELS
+    ] + [[types.InlineKeyboardButton(text="Я подписался", callback_data="check_subscription_callback")]]
+)
+    
     await bot.send_message(
         chat_id, 
         "Для использования бота необходимо подписаться на каналы:", 
@@ -162,17 +215,12 @@ async def is_user_subscribed(user_id: int) -> bool:
             return False
     return True
 
+ 
 async def process_download(message: types.Message, format_key: str, state: FSMContext):
     user_id = message.from_user.id
     chat_id = message.chat.id
 
     if not await ensure_user_exists(message):
-        return
-    
-    if not await is_user_subscribed(user_id):
-        await message.answer("Для скачивания необходимо подписаться на каналы.")
-        await send_subscription_request(message.chat.id)
-        release_user_lock(user_id)
         return
 
     user_data = await state.get_data()
@@ -187,6 +235,11 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         await message.answer("Неподдерживаемый формат.")
         return
 
+    if not await is_user_subscribed(user_id):
+        await message.answer("Для скачивания необходимо подписаться на каналы.")
+        await send_subscription_request(chat_id)
+        return
+
     if not acquire_user_lock(user_id):
         await message.answer("⏳ У вас уже выполняется загрузка. Пожалуйста, подождите.")
         return
@@ -195,6 +248,13 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         await user_actioner.update_date(user_id, datetime.now(timezone.utc))
     except Exception as e:
         logger.warning(f"Не удалось обновить дату для пользователя {user_id}: {e}")
+
+    try:
+        estimated_size = await estimate_video_size(url, format_config)
+        logger.info(f"Оценка размера для {url}: {estimated_size} байт")
+        
+    except Exception as e:
+        logger.error(f"Ошибка оценки размера: {e}")
 
     await message.answer("Пожалуйста, подождите...")
 
@@ -218,54 +278,131 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
 
     if 'postprocessors' in format_config:
         ydl_opts['postprocessors'] = format_config['postprocessors']
+        ydl_opts['keepvideo'] = True  
 
     try:
+        logger.info(f"Начало обработки: {url}")
+        logger.info(f"Формат: {format_key}")
+        logger.info(f"Параметры: {format_config}")
+        
         with YoutubeDL(ydl_opts) as ydl:
             info = await asyncio.to_thread(ydl.extract_info, url)
-
+            url = None
+            logger.info(f"Информация о видео: {info.get('title')}")
+            logger.info(f"Расширение: {info.get('ext')}")
             if 'requested_downloads' in info and info['requested_downloads']:
-                ext = info['requested_downloads'][0]['ext']
+                logger.info(f"Запрошенные загрузки: {info['requested_downloads'][0]}")
+
+            if 'postprocessors' in format_config:
+                ext = format_config['extension']
+                final_path = f"{base_filename}.{ext}"
+                
+                for i in range(15):
+                    if os.path.exists(final_path):
+                        break
+                    logger.info(f"Ожидание файла ({i+1}/15): {final_path}")
+                    await asyncio.sleep(1)
+                else:
+                    raise FileNotFoundError(f"Конвертированный файл не найден: {final_path}")
             else:
                 ext = info.get('ext', 'mp4')
-
-            expected_file = f"{base_filename}.{ext}"
-            candidates = glob.glob(f"{base_filename}*")
-            final_path = next((f for f in candidates if f.endswith(ext)), expected_file)
+                final_path = f"{base_filename}.{ext}"
+                
+                if not os.path.exists(final_path):
+                    candidates = glob.glob(f"{base_filename}*")
+                    logger.info(f"Файл не найден, кандидаты: {candidates}")
+                    
+                    filtered_candidates = [
+                        f for f in candidates 
+                        if not re.search(r'\.f\d+\.', f)
+                        and not f.endswith('.part')        
+                        and not f.endswith('.ytdl')                             ]
+                    
+                    logger.info(f"Отфильтрованные кандидаты: {filtered_candidates}")
+                    
+                    if filtered_candidates:
+                        filtered_candidates.sort(key=os.path.getmtime, reverse=True)
+                        final_path = filtered_candidates[0]
+                        logger.info(f"Выбран файл по дате изменения: {final_path}")
+                    
+                    if not os.path.exists(final_path) and candidates:
+                        final_path = candidates[0]
+                        logger.info(f"Выбран первый кандидат: {final_path}")
 
         if not os.path.exists(final_path):
             raise FileNotFoundError(f"Файл не найден после скачивания: {final_path}")
 
         file_size = os.path.getsize(final_path)
-
-        if file_size > MAX_TELEGRAM_SIZE:
-            from googleapiclient.http import MediaFileUpload
-
-            file_metadata = {'name': os.path.basename(final_path), 'parents': [GDRIVE_FOLDER_ID]}
-            media = MediaFileUpload(final_path, resumable=True)
-            file = service.files().create(body=file_metadata, media_body=media, fields='id,webViewLink').execute()
-            service.permissions().create(body={"role": "reader", "type": "anyone"}, fileId=file["id"]).execute()
-            await message.answer(f"Файл слишком большой для Telegram.\nСкачать с Google Drive: {file['webViewLink']}")
+        logger.info(f"Финальный путь: {final_path}, размер: {file_size} байт")
+        fs_file = types.FSInputFile(final_path)
+        if format_config['send_method'] == 'send_audio':
+            await message.answer_audio(fs_file)
+        elif format_config['send_method'] == 'send_video':
+            await message.answer_video(fs_file)
         else:
-            fs_file = types.FSInputFile(final_path)
-            if format_config['send_method'] == 'send_audio':
-                await message.answer_audio(fs_file)
-            elif format_config['send_method'] == 'send_video':
-                await message.answer_video(fs_file)
-            else:
-                await message.answer_document(fs_file)
+            await message.answer_document(fs_file)
 
     except Exception as e:
-        logger.error(f"Ошибка при скачивании/отправке: {e}")
-        await message.answer(f"Произошла ошибка: {str(e)}")
+        logger.error(f"Ошибка при скачивании/отправке: {e}", exc_info=True)
+        error_message = f"Произошла ошибка: {str(e)}"
+        
+        if "File not found" in str(e):
+            error_message += "\n\n⚠️ Файл не был создан после обработки. Возможно, проблема с конвертацией."
+        elif "HttpError 404" in str(e):
+            error_message += "\n\n⚠️ Ошибка доступа к Google Drive. Проверьте настройки папки."
+        elif "Unable to download webpage" in str(e):
+            error_message += "\n\n⚠️ Ошибка доступа к видео. Проверьте ссылку или попробуйте позже."
+        elif "Private video" in str(e):
+            error_message += "\n\n🔒 Это приватное видео. Доступ ограничен."
+        elif "Members-only" in str(e):
+            error_message += "\n\n🔒 Видео доступно только для участников канала."
+        elif "Copyright" in str(e):
+            error_message += "\n\n⚠️ Видео содержит защищенный авторским правом контент."
+        
+        await message.answer(error_message)
+        
+        await state.clear()
 
     finally:
+        
         release_user_lock(user_id)
         if final_path and os.path.exists(final_path):
             try:
                 os.remove(final_path)
+                logger.info(f"Удален временный файл: {final_path}")
             except Exception as e:
                 logger.warning(f"Ошибка при удалении {final_path}: {e}")
-      
+        
+        temp_files = glob.glob(f"{base_filename}*")
+        for temp_file in temp_files:
+            if temp_file != final_path and os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                    logger.info(f"Удален временный файл: {temp_file}")
+                except Exception as e:
+                    logger.warning(f"Ошибка удаления временного файла {temp_file}: {e}")
+                    
+                    
+@dp.message(Command("health"))
+async def healthcheck(message: types.Message):
+    await message.answer("Бот работает.")
+
+
+@dp.message(Command("locks"))
+async def list_locks(message: types.Message):
+    if message.from_user.id != ADMIN_USER_ID:
+        await message.answer("⛔ Нет доступа.")
+        return
+
+    from redis_lock import get_all_locks
+
+    locks = get_all_locks()
+    if not locks:
+        await message.answer("🔓 Нет активных блокировок.")
+    else:
+        await message.answer("🔐 Активные блокировки:\n" + "\n".join(locks))
+
+
 @dp.message(Command("check_subscription"))
 async def check_subscription_command(message: types.Message):
     user_id = message.from_user.id
@@ -323,11 +460,10 @@ async def start_command(message: types.Message):
         await send_subscription_request(message.chat.id)
         return
 
-
     await message.answer(f"Привет, {message.from_user.first_name}!\nОтправь ссылку на видео или аудио.")
 
 
-dp.message(Command("update_cookies"))
+@dp.message(Command("update_cookies"))
 async def update_cookies_command(message: types.Message):
     if message.from_user.id != ADMIN_USER_ID:
         await message.answer("Доступ запрещён.")
@@ -348,39 +484,67 @@ async def update_cookies_command(message: types.Message):
 
 @dp.message(F.text.regexp(r'https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w\-]+'))
 async def handle_video_link(message: types.Message, state: FSMContext):
-    if not await is_user_subscribed(message.from_user.id):
+    logger.info(f"Пользователь {message.from_user.id} отправил ссылку: {message.text}")
+
+        await message.answer("Пожалуйста подождите")
+    user_id = message.from_user.id
+
+    if not await is_user_subscribed(user_id):
         await message.answer("Для скачивания необходимо подписаться на каналы.")
         await send_subscription_request(message.chat.id)
         return
+
     await state.set_state(DownloadState.waiting_for_format)
     await state.update_data(last_url=message.text)
+
+    cached_sizes = {}
+
+    response = "Выберите качество:\n\n"
+    for format_key, format_info in FORMATS.items():
+        key = (message.text, format_key)
+        try:
+            if key in cached_sizes:
+                size = cached_sizes[key]
+            else:
+                size = await estimate_video_size(message.text, format_info)
+                cached_sizes[key] = size
+
+            if size > 0:
+                size_str = format_size(size)
+                response += f"/{format_key} - {size_str}\n"
+            else:
+                response += f"/{format_key}\n"
+        except Exception as e:
+            logger.error(f"Ошибка оценки размера для {format_key}: {e}")
+            response += f"/{format_key}\n"
 
     builder = ReplyKeyboardBuilder()
     for format_key in FORMATS.keys():
         builder.add(types.KeyboardButton(text=f"/{format_key}"))
     builder.adjust(3)
 
-    await message.answer("Выберите качество или формат:", reply_markup=builder.as_markup(resize_keyboard=True))
+    await message.answer(response, reply_markup=builder.as_markup(resize_keyboard=True))
+
 
 @dp.message(Command(*FORMATS.keys()))
 async def handle_format_command(message: types.Message, state: FSMContext):
+    logger.info(f"Пользователь {message.from_user.id} выбрал формат: {message.text}")
+
     format_key = message.text[1:]
+    if format_key not in FORMATS:
+        await message.answer("Неверный формат.")
+        return
+
+    user_data = await state.get_data()
+    url = user_data.get("last_url")
+
+    if not url:s
+        await message.answer("⚠️ Сначала отправьте ссылку на видео.")
+        return
+
     await process_download(message, format_key, state)
 
-async def main():
-    scheduler = AsyncIOScheduler()
-    schedule_cookie_update(scheduler)
-    scheduler.start()
-    logger.info("Бот запущен!")
-    await db.connect()
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await db.close()
+    await state.clear()
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logging.info("Бот остановлен")
+
+

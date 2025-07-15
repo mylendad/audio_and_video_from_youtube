@@ -1,12 +1,12 @@
-from pydantic import BaseSettings
+from envparse import Env
 
-class Settings(BaseSettings):
-    token: str
-    admin_chat_id: int
-    gdrive_folder_id: str
-    database_url: str
-    
-    class Config:
-        env_file = ".env"
+env = Env()
+env.read_envfile()
 
-config = Settings()
+TOKEN = env.str("TOKEN")
+ADMIN_CHAT_ID = env.int("ADMIN_CHAT_ID")
+ADMIN_USER_ID = env.int("ADMIN_USER_ID")
+
+REQUIRED_CHANNELS = [ch for ch in env.list("REQUIRED_CHANNELS", default=[]) if ch]
+
+DB_DSN = env.str("DB_DSN")
