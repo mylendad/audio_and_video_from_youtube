@@ -18,7 +18,7 @@ import glob
 
 from yt_dlp import YoutubeDL
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+# from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 from cookies.updater import export_youtube_cookies_to_txt
 
@@ -486,8 +486,8 @@ async def update_cookies_command(message: types.Message):
 async def handle_video_link(message: types.Message, state: FSMContext):
     logger.info(f"Пользователь {message.from_user.id} отправил ссылку: {message.text}")
 
-        await message.answer("Пожалуйста подождите")
-    user_id = message.from_user.id
+    await message.answer("Пожалуйста подождите")
+    user_id = message.from_user.ids
 
     if not await is_user_subscribed(user_id):
         await message.answer("Для скачивания необходимо подписаться на каналы.")
@@ -538,7 +538,7 @@ async def handle_format_command(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     url = user_data.get("last_url")
 
-    if not url:s
+    if not url:
         await message.answer("⚠️ Сначала отправьте ссылку на видео.")
         return
 

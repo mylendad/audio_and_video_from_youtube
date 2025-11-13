@@ -1,7 +1,8 @@
 import redis
 import time
+from config import REDIS_HOST, REDIS_PORT
 
-r = redis.Redis(host='localhost', port=6379, db=0)
+r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
 
 def acquire_user_lock(user_id: int, ttl: int = 600) -> bool:
     

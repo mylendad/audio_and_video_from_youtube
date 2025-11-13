@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: youtube_downloader_bot
+    depends_on:
+      - db
+      - redis
+    env_file:
+      - .env
+    volumes:
+      - ./www.youtube.com_cookies.txt:/app/www.youtube.com_cookies.txt
+
+  db:
+    image: postgres:14-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-youtube_bot_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+
+volumes:
+  postgres_data:
