@@ -10,3 +10,7 @@ ADMIN_USER_ID = env.int("ADMIN_USER_ID")
 REQUIRED_CHANNELS = [ch for ch in env.list("REQUIRED_CHANNELS", default=[]) if ch]
 
 DB_DSN = env.str("DB_DSN")
+
+REDIS_HOST = env.str("REDIS_HOST", default="localhost")
+REDIS_PORT = env.int("REDIS_PORT", default=6379)
+
