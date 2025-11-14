@@ -3,7 +3,7 @@ name = "youtube_downloader_bot"
 version = "0.1.0"
 description = "A Telegram bot to download audio and video from YouTube."
 authors = [
-    {name = "Gemini", email = "gemini@google.com"},
+    {name = "mylendad", email = "karpov.vlg@gmail.com"},
 ]
 dependencies = [
     "aiogram",
@@ -13,4 +13,6 @@ dependencies = [
     "envparse",
     "browser-cookie3",
     "psycopg2-binary",
+    "google-api-python-client",
+    "cookies"
 ]
