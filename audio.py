@@ -18,7 +18,7 @@ import glob
 
 from yt_dlp import YoutubeDL
 from googleapiclient.discovery import build
-# from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 from cookies.updater import export_youtube_cookies_to_txt
 
