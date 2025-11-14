@@ -7,6 +7,7 @@ authors = [
 ]
 dependencies = [
     "aiogram",
+    "asyncpg",
     "yt-dlp",
     "APScheduler",
     "redis",
@@ -14,5 +15,4 @@ dependencies = [
     "browser-cookie3",
     "psycopg2-binary",
     "google-api-python-client",
-    "cookies"
 ]

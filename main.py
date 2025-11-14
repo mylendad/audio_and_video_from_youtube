@@ -1,21 +1,24 @@
 import logging
 import asyncio
 
-from audio import AsyncIOScheduler, db, dp, bot, schedule_cookie_update, logger
-from config import ADMIN_CHAT_ID
-from aiogram.types import Message
-from envparse import Env
+from aiogram import Dispatcher
+from audio import AsyncIOScheduler, db, bot, schedule_cookie_update, logger
+from handlers import bot as bot_handlers
+
+dp = Dispatcher()
 
 async def main():
     scheduler = AsyncIOScheduler()
     schedule_cookie_update(scheduler)
     scheduler.start()
 
-    logger.info("\u0411\u043e\u0442 \u0437\u0430\u043f\u0443\u0449\u0435\u043d!")
-    try:
+    dp.include_router(bot_handlers.router)
+
+    logger.info("Бот запущен!")
+    try:    
         await db.connect()
     except Exception as e:
-        logger.critical(f"\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f \u043a \u0411\u0414: {e}")
+        logger.critical(f"Ошибка подключения к БД: {e}")
         return
 
     try:
@@ -28,4 +31,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logging.info("\u0411\u043e\u0442 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d")
+        logging.info("Бот остановлен")
