@@ -3,7 +3,7 @@ FROM python:3.12
 WORKDIR /app
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+RUN apt install python3-pip && pip install .
 
 COPY . .
 

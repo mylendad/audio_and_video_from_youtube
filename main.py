@@ -17,6 +17,7 @@ async def main():
     logger.info("Бот запущен!")
     try:    
         await db.connect()
+        await db.init_db()
     except Exception as e:
         logger.critical(f"Ошибка подключения к БД: {e}")
         return
