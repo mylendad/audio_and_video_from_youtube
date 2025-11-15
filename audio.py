@@ -19,7 +19,7 @@ from yt_dlp import YoutubeDL
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
-from generate_cookies import export_youtube_cookies_to_txt
+# from generate_cookies import export_youtube_cookies_to_txt
 
 from redis_lock import acquire_user_lock, release_user_lock
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -150,7 +150,7 @@ async def ensure_user_exists(message_or_query: types.Message | types.CallbackQue
 
 def schedule_cookie_update(scheduler: AsyncIOScheduler):
     logger.info("Настраиваем автообновление cookies...")
-    scheduler.add_job(export_youtube_cookies_to_txt, trigger="interval", hours=12, id="update_cookies")
+    # scheduler.add_job(export_youtube_cookies_to_txt, trigger="interval", hours=12, id="update_cookies")
     logger.info("Планировщик cookies активирован")
 
 
