@@ -19,14 +19,14 @@ async def healthcheck(message: types.Message):
 @router.message(Command("locks"))
 async def list_locks(message: types.Message):
     if message.from_user.id != ADMIN_USER_ID:
-        await message.answer("⛔ Нет доступа.")
+        await message.answer("Нет доступа.")
         return
 
     locks = get_all_locks()
     if not locks:
-        await message.answer("🔓 Нет активных блокировок.")
+        await message.answer("Нет активных блокировок.")
     else:
-        await message.answer("🔐 Активные блокировки:\n" + "\n".join(locks))
+        await message.answer("Активные блокировки:\n" + "\n".join(locks))
 
 
 @router.message(Command("check_subscription"))
@@ -72,8 +72,7 @@ async def start_command(message: types.Message):
         await send_subscription_request(message.chat.id)
         return
 
-    await message.answer(f"Привет, {message.from_user.first_name}!
-Отправь ссылку на видео или аудио.")
+    await message.answer(f"Привет, {message.from_user.first_name}! Отправь ссылку на видео или аудио.")
 
 
 @router.message(Command("update_cookies"))
@@ -91,7 +90,6 @@ async def update_cookies_command(message: types.Message):
             await message.answer("Не удалось обновить cookies. Проверьте логи сервера.")
     except Exception as e:
         await message.answer(f"Критическая ошибка: {str(e)}")
-
 
 @router.message(F.text.regexp(r'https?://(?:www\.?youtube\.com/watch\?v=|youtu\.be/)["\w\-]+'))
 async def handle_video_link(message: types.Message, state: FSMContext):
@@ -145,7 +143,7 @@ async def handle_format_command(message: types.Message, state: FSMContext):
     url = user_data.get("last_url")
 
     if not url:
-        await message.answer("⚠️ Сначала отправьте ссылку на видео.")
+        await message.answer("Сначала отправьте ссылку на видео.")
         return
 
     await process_download(message, format_key, state)
