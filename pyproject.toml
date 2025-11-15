@@ -12,9 +12,8 @@ dependencies = [
     "APScheduler==3.10.4",
     "redis==5.0.7",
     "envparse==0.2.0",
-    "browser-cookie3==0.20.0",
+    "browser-cookie3==0.19.1",
     "loguru==0.7.2",
-    "google-api-python-client",
+    "google-api-python-client==2.134.0",
+    "psycopg2-binary==2.9.9",
 ]
-
-comment = добавить версии для КБ
