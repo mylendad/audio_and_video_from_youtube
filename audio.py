@@ -56,7 +56,14 @@ def format_size(size_bytes: int) -> str:
         i += 1
         
     return f"{size:.2f} {units[i]}"  
-    
+
+def is_youtube_url(url: str) -> bool:
+    """Checks if the given URL is a valid YouTube URL."""
+    youtube_regex = (
+        r'(https?://)?(www\.)?'
+        '(youtube|youtu|youtube-nocookie)\.(com|be)/'
+        '(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})')
+    return re.match(youtube_regex, url) is not None
 
 async def estimate_video_size(url: str, format_config: dict) -> int:
     ydl_opts = {
@@ -175,6 +182,10 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
 
     if not url:
         await message.answer("Сначала отправьте ссылку на видео.")
+        return
+
+    if not is_youtube_url(url):
+        await message.answer("Пожалуйста, отправьте действительную ссылку на YouTube.")
         return
 
     format_config = FORMATS.get(format_key)

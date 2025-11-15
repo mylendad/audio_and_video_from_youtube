@@ -19,10 +19,3 @@ class TelegramClient:
         url = self.prepare_url(method)
         resp = requests.post(url, params=params, data=body)
         return resp.json()
-
-
-if __name__ == "__main__":
-    token = "5962407472:AAGEfvs8EDphGhLy0PuR58YpSPMEuWfAX4Q"
-    telegram_client = TelegramClient(token=token, base_url="https://api.telegram.org")
-    my_params = {"chat_id": 458073613, "text": "sampleTEXT"}
-    print(telegram_client.post(method="sendMessage", params=my_params))
