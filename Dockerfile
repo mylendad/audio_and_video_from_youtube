@@ -7,4 +7,7 @@ RUN pip install .
 
 COPY . .
 
+RUN useradd -m appuser
+USER appuser
+
 CMD ["python", "main.py"]

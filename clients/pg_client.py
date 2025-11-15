@@ -1,8 +1,5 @@
-import psycopg2
-from psycopg2 import sql
-
-import asyncpg
 from asyncpg import Pool
+import asyncpg
 
 import asyncio
 import logging

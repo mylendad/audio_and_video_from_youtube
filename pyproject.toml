@@ -6,13 +6,15 @@ authors = [
     {name = "mylendad", email = "karpov.vlg@gmail.com"},
 ]
 dependencies = [
-    "aiogram",
-    "yt-dlp",
-    "APScheduler",
-    "redis",
-    "envparse",
-    "browser-cookie3",
-    "psycopg2-binary",
+    "aiogram==3.8.0",
+    "asyncpg==0.29.0",
+    "yt-dlp==2024.7.16",
+    "APScheduler==3.10.4",
+    "redis==5.0.7",
+    "envparse==0.2.0",
+    "browser-cookie3==0.20.0",
+    "loguru==0.7.2",
     "google-api-python-client",
-    "cookies"
 ]
+
+comment = добавить версии для КБ
