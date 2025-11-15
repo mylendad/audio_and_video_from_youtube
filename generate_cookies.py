@@ -1,5 +1,5 @@
 import os
-import browser_cookie3
+from lib import browser_cookie3
 from http.cookiejar import MozillaCookieJar
 import logging
 
