@@ -71,7 +71,7 @@ async def estimate_video_size(url: str, format_config: dict) -> int:
         'simulate': True,
         'format': format_config['format'],
         'cookiefile': COOKIE_FILE,
-        'proxy': 'socks5://127.0.0.1:9050',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
     
     if 'postprocessors' in format_config:
@@ -231,7 +231,7 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         'noprogress': False,
         'verbose': True,
         'cookiefile': COOKIE_FILE,
-        'proxy': 'socks5://127.0.0.1:9050',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
 
     if 'postprocessors' in format_config:

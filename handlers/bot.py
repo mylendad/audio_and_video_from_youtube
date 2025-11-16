@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 from audio import process_download, DownloadState, ensure_user_exists, is_user_subscribed, send_subscription_request, estimate_video_size, format_size
-from config import ADMIN_USER_ID
+from config import ADMIN_USER_ID, ADMIN_CHAT_ID
 from constants import FORMATS
 from generate_cookies import export_youtube_cookies_to_txt
 from redis_lock import get_all_locks
@@ -50,10 +50,11 @@ async def check_subscription_callback_handler(callback: types.CallbackQuery):
 
 @router.message(Command("refresh_cookies"))
 async def refresh_cookies_handler(message: types.Message):
-    if message.from_user.id != ADMIN_USER_ID:
-        await message.answer("У вас нет доступа к этой команде.")
-        return
+    if message.from_user.id not in {ADMIN_USER_ID, ADMIN_CHAT_ID}:
 
+        await message.answer("У вас нет доступаmessage.from_user.id != ADMIN_USER_ID к этой команде.")
+        return
+    message.from_user.id != ADMIN_USER_ID 
     await message.answer("Обновляю cookies...")
     success = export_youtube_cookies_to_txt()
     if success:
