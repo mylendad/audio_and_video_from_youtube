@@ -326,20 +326,22 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
             logger.info("Файл больше 50 МБ, будет использован временный сервер.")
             await status_message.edit_text("Файл слишком большой. Запускаю временный сервер для отправки...")
             try:
-                async with public_file_server(final_path) as public_url:
+                content_type = 'application/octet-stream'
+                if format_config['send_method'] == 'send_audio':
+                    content_type = 'audio/mpeg'
+                elif format_config['send_method'] == 'send_video':
+                    content_type = 'video/mp4'
+
+                async with public_file_server(final_path, content_type=content_type) as public_url:
                     await status_message.edit_text(f"Отправка большого файла. Ссылка будет действительна несколько минут...")
-                    
-                    url_file = URLInputFile(public_url)
-                    
+                                        
                     if format_config['send_method'] == 'send_audio':
-                        await message.answer_audio(url_file)
+                        await message.answer_audio(public_url, request_timeout=1800)
                     elif format_config['send_method'] == 'send_video':
-                        await message.answer_video(url_file)
+                        await message.answer_video(public_url, request_timeout=1800)
                     else:
-                        await message.answer_document(url_file)
+                        await message.answer_document(public_url, request_timeout=1800)
                 
-                # После успешной отправки и выхода из контекста, файл уже удален
-                # Устанавливаем final_path в None, чтобы finally-блок его не трогал
                 final_path = None
 
             except Exception as e:
@@ -352,8 +354,6 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         
         if "File not found" in str(e):
             error_message += "\n\n Файл не был создан после обработки. Возможно, проблема с конвертацией."
-        elif "HttpError 404" in str(e):
-            error_message += "\n\n Ошибка доступа к Google Drive. Проверьте настройки папки."
         elif "Unable to download webpage" in str(e):
             error_message += "\n\n Ошибка доступа к видео. Проверьте ссылку или попробуйте позже."
         elif "Private video" in str(e):

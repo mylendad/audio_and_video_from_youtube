@@ -6,7 +6,7 @@ import logging
 # TODO: This script has a critical architectural flaw. It depends on a local
 # Google Chrome browser installation to extract cookies, making the application
 # non-portable and unsuitable for containerized deployment. This entire mechanism
-# needs to be re-thought for a production environment, for example by using a
+# needs to be re-thought for a production environment, for example by using aaudio_and_video_from_youtube
 # proper API-based authentication method or a more robust cookie management solution.
 
 OUTPUT_FILE = 'www.youtube.com_cookies.txt'

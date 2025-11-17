@@ -7,6 +7,7 @@ import os
 import logging
 import secrets
 from contextlib import asynccontextmanager
+from config import HTTP_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -27,43 +28,59 @@ async def get_public_ip() -> str:
         logger.error(f"Не удалось получить публичный IP: {e}")
         raise ConnectionError("Не удалось определить публичный IP-адрес сервера.") from e
 
-def find_free_port() -> int:
-    """Находит свободный порт для запуска сервера."""
-    with socketserver.TCPServer(("0.0.0.0", 0), None) as s:
-        return s.server_address[1]
+def create_file_handler(file_path, content_type):
+    """Создает кастомный обработчик запросов для одного файла с явным content_type."""
+    
+    class CustomFileHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            self.file_path = file_path
+            self.content_type = content_type
+            super().__init__(*args, **kwargs)
+
+        def do_GET(self):
+            if self.path.endswith(os.path.basename(self.file_path)):
+                try:
+                    with open(self.file_path, 'rb') as f:
+                        fs = os.fstat(f.fileno())
+                        
+                        self.send_response(200)
+                        self.send_header("Content-type", self.content_type)
+                        self.send_header("Content-Length", str(fs.st_size))
+                        self.end_headers()
+                        
+                        self.copyfile(f, self.wfile)
+                except FileNotFoundError:
+                    self.send_error(404, "File not found")
+            else:
+                self.send_error(404, "File not found")
+
+    return CustomFileHandler
 
 @asynccontextmanager
-async def public_file_server(original_path: str):
+async def public_file_server(original_path: str, content_type: str = 'application/octet-stream'):
     """
     Асинхронный контекстный менеджер для временной публикации файла по HTTP.
-    При входе в контекст запускает HTTP-сервер и возвращает публичный URL.
-    При выходе из контекста останавливает сервер и удаляет файл.
     """
     if not os.path.exists(original_path):
         raise FileNotFoundError(f"Файл для публикации не найден: {original_path}")
 
     public_ip = await get_public_ip()
-    port = find_free_port()
+    port = HTTP_PORT
     
-    # Генерируем случайное имя файла для безопасности
     random_filename = f"{secrets.token_hex(16)}_{os.path.basename(original_path)}"
     served_path = os.path.join(SERVE_DIR, random_filename)
     
-    # Перемещаем файл в директорию для раздачи
     os.rename(original_path, served_path)
 
-    handler = http.server.SimpleHTTPRequestHandler
-    
-    # Используем functools.partial, чтобы передать директорию в обработчик
-    from functools import partial
-    handler_with_dir = partial(handler, directory=SERVE_DIR)
+    # Создаем обработчик для конкретного файла с явным content_type
+    Handler = create_file_handler(served_path, content_type)
 
     httpd = None
     server_thread = None
     public_url = f"http://{public_ip}:{port}/{random_filename}"
     
     try:
-        httpd = socketserver.TCPServer(("", port), handler_with_dir)
+        httpd = socketserver.TCPServer(("", port), Handler)
         
         server_thread = threading.Thread(target=httpd.serve_forever)
         server_thread.daemon = True
