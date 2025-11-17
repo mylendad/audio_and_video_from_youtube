@@ -9,7 +9,7 @@ FORMATS = {
         'send_method': 'send_audio'
     },
     '144': {
-        'format': 'bestvideo[height<=144][ext=mp4]',
+        'format': 'bestvideo[height<=144]+bestaudio/best[height<=144]',
         'extension': 'mp4',
         'send_method': 'send_video'
     },

@@ -1,7 +1,7 @@
 import os
 import asyncio
 import re
-
+import time
 from datetime import datetime, timezone
 from lib import browser_cookie3
 import logging
@@ -12,9 +12,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import URLInputFile
 import glob
 
+from web_server import public_file_server
 from yt_dlp import YoutubeDL
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -22,7 +24,6 @@ from googleapiclient.errors import HttpError
 from generate_cookies import export_youtube_cookies_to_txt
 
 from redis_lock import acquire_user_lock, release_user_lock
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from clients.async_user_actioner import AsyncUserActioner
 from clients.pg_client import AsyncPostgresClient
 
@@ -32,6 +33,9 @@ from constants import FORMATS
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Лимит размера файла для прямой отправки (49 МБ для надежности)
+MAX_FILE_SIZE = 49 * 1024 * 1024
 
 
 bot = Bot(token=TOKEN)
@@ -148,13 +152,6 @@ async def ensure_user_exists(message_or_query: types.Message | types.CallbackQue
         
     return False
 
-def schedule_cookie_update(scheduler: AsyncIOScheduler):
-    logger.info("Настраиваем автообновление cookies...")
-    scheduler.add_job(export_youtube_cookies_to_txt, trigger="interval", hours=12, id="update_cookies")
-    logger.info("Планировщик cookies активирован")
-
-
-
 async def is_user_subscribed(user_id: int) -> bool:
     if not REQUIRED_CHANNELS: 
         return True
@@ -169,7 +166,6 @@ async def is_user_subscribed(user_id: int) -> bool:
             return False
     return True
 
- 
 async def process_download(message: types.Message, format_key: str, state: FSMContext):
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -199,27 +195,50 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         return
 
     if not acquire_user_lock(user_id):
-        await message.answer("⏳ У вас уже выполняется загрузка. Пожалуйста, подождите.")
+        await message.answer(" У вас уже выполняется загрузка. Пожалуйста, подождите.")
         return
 
     try:
         await user_actioner.update_date(user_id, datetime.now(timezone.utc))
     except Exception as e:
-        logger.warning(f"Не удалось обновить дату для пользователя {user_id}: {e}")
+        logger.warning(f" Не удалось обновить дату для пользователя {user_id}: {e}")
 
-    try:
-        estimated_size = await estimate_video_size(url, format_config)
-        logger.info(f"Оценка размера для {url}: {estimated_size} байт")
-        
-    except Exception as e:
-        logger.error(f"Ошибка оценки размера: {e}")
-
-    await message.answer("Пожалуйста, подождите...")
+    status_message = await message.answer("Пожалуйста, подождите...")
 
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
     base_filename = f"temp_{user_id}_{timestamp}"
     output_template = f"{base_filename}.%(ext)s"
     final_path = None
+
+    last_update_time = 0
+    loop = asyncio.get_running_loop()
+
+    async def edit_status_message(text: str):
+        try:
+            await status_message.edit_text(text)
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                logger.warning(f"Could not edit progress message: {e}")
+        except Exception as e:
+            logger.warning(f"Could not edit progress message: {e}")
+
+    def progress_hook(d):
+        nonlocal last_update_time
+        if d['status'] == 'downloading':
+            current_time = time.time()
+            if current_time - last_update_time < 5:
+                return
+
+            percent_str = d.get('_percent_str', '0.0%').strip()
+            speed_str = d.get('_speed_str', 'N/A').strip()
+            eta_str = d.get('_eta_str', 'N/A').strip()
+            
+            text = f" Загрузка: {percent_str} | Скорость: {speed_str} | ETA: {eta_str}"
+            asyncio.run_coroutine_threadsafe(edit_status_message(text), loop)
+            last_update_time = current_time
+        
+        elif d['status'] == 'finished':
+            asyncio.run_coroutine_threadsafe(edit_status_message(" Загрузка завершена, обработка..."), loop)
 
     ydl_opts = {
         'outtmpl': output_template,
@@ -228,10 +247,11 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         'buffersize': 1024 * 1024 * 16,
         'http_chunk_size': 1048576,
         'continuedl': True,
-        'noprogress': False,
-        'verbose': True,
+        'noprogress': True, 
+        'verbose': False,
         'cookiefile': COOKIE_FILE,
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'progress_hooks': [progress_hook],
     }
 
     if 'postprocessors' in format_config:
@@ -292,30 +312,56 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
 
         file_size = os.path.getsize(final_path)
         logger.info(f"Финальный путь: {final_path}, размер: {file_size} байт")
-        fs_file = types.FSInputFile(final_path)
-        if format_config['send_method'] == 'send_audio':
-            await message.answer_audio(fs_file)
-        elif format_config['send_method'] == 'send_video':
-            await message.answer_video(fs_file)
+
+        if file_size <= MAX_FILE_SIZE:
+            logger.info("Файл меньше 50 МБ, отправка напрямую.")
+            fs_file = types.FSInputFile(final_path)
+            if format_config['send_method'] == 'send_audio':
+                await message.answer_audio(fs_file)
+            elif format_config['send_method'] == 'send_video':
+                await message.answer_video(fs_file)
+            else:
+                await message.answer_document(fs_file)
         else:
-            await message.answer_document(fs_file)
+            logger.info("Файл больше 50 МБ, будет использован временный сервер.")
+            await status_message.edit_text("Файл слишком большой. Запускаю временный сервер для отправки...")
+            try:
+                async with public_file_server(final_path) as public_url:
+                    await status_message.edit_text(f"Отправка большого файла. Ссылка будет действительна несколько минут...")
+                    
+                    url_file = URLInputFile(public_url)
+                    
+                    if format_config['send_method'] == 'send_audio':
+                        await message.answer_audio(url_file)
+                    elif format_config['send_method'] == 'send_video':
+                        await message.answer_video(url_file)
+                    else:
+                        await message.answer_document(url_file)
+                
+                # После успешной отправки и выхода из контекста, файл уже удален
+                # Устанавливаем final_path в None, чтобы finally-блок его не трогал
+                final_path = None
+
+            except Exception as e:
+                logger.error(f"Ошибка при работе временного сервера: {e}", exc_info=True)
+                await message.answer(f"Не удалось отправить большой файл из-за внутренней ошибки сервера: {e}")
 
     except Exception as e:
         logger.error(f"Ошибка при скачивании/отправке: {e}", exc_info=True)
         error_message = f"Произошла ошибка: {str(e)}"
         
         if "File not found" in str(e):
-            error_message += "\n\n⚠️ Файл не был создан после обработки. Возможно, проблема с конвертацией."
+            error_message += "\n\n Файл не был создан после обработки. Возможно, проблема с конвертацией."
         elif "HttpError 404" in str(e):
-            error_message += "\n\n⚠️ Ошибка доступа к Google Drive. Проверьте настройки папки."
+            error_message += "\n\n Ошибка доступа к Google Drive. Проверьте настройки папки."
         elif "Unable to download webpage" in str(e):
-            error_message += "\n\n⚠️ Ошибка доступа к видео. Проверьте ссылку или попробуйте позже."
+            error_message += "\n\n Ошибка доступа к видео. Проверьте ссылку или попробуйте позже."
         elif "Private video" in str(e):
-            error_message += "\n\n🔒 Это приватное видео. Доступ ограничен."
+            error_message += "\n\n Это приватное видео. Доступ ограничен."
         elif "Members-only" in str(e):
-            error_message += "\n\n🔒 Видео доступно только для участников канала."
+            error_message += "\n\n Видео доступно только для участников канала."
         elif "Copyright" in str(e):
-            error_message += "\n\n⚠️ Видео содержит защищенный авторским правом контент."
+            error_message += "\n\Видео содержит защищенный авторским правом контент."
         
         await message.answer(error_message)
         
