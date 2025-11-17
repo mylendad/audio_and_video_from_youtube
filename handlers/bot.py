@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 from audio import process_download, DownloadState, ensure_user_exists, is_user_subscribed, send_subscription_request, estimate_video_size, format_size
-from config import ADMIN_USER_ID
+from config import ADMIN_USER_ID, ADMIN_CHAT_ID
 from constants import FORMATS
 from generate_cookies import export_youtube_cookies_to_txt
 from redis_lock import get_all_locks
@@ -48,20 +48,6 @@ async def check_subscription_callback_handler(callback: types.CallbackQuery):
         await callback.answer("Вы ещё не подписались на все каналы!", show_alert=True)
 
 
-@router.message(Command("refresh_cookies"))
-async def refresh_cookies_handler(message: types.Message):
-    if message.from_user.id != ADMIN_USER_ID:
-        await message.answer("У вас нет доступа к этой команде.")
-        return
-
-    await message.answer("Обновляю cookies...")
-    success = export_youtube_cookies_to_txt()
-    if success:
-        await message.answer("Cookies успешно обновлены.")
-    else:
-        await message.answer("Не удалось обновить cookies. Проверь лог.")
-
-
 @router.message(Command("start"))
 async def start_command(message: types.Message):
     user_id = message.from_user.id
@@ -73,23 +59,6 @@ async def start_command(message: types.Message):
         return
 
     await message.answer(f"Привет, {message.from_user.first_name}! Отправь ссылку на видео или аудио.")
-
-
-@router.message(Command("update_cookies"))
-async def update_cookies_command(message: types.Message):
-    if message.from_user.id != ADMIN_USER_ID:
-        await message.answer("Доступ запрещён.")
-        return
-
-    try:
-        success = export_youtube_cookies_to_txt()
-        
-        if success:
-            await message.answer("Cookies успешно обновлены.")
-        else:
-            await message.answer("Не удалось обновить cookies. Проверьте логи сервера.")
-    except Exception as e:
-        await message.answer(f"Критическая ошибка: {str(e)}")
 
 @router.message(F.text.regexp(r'https?://(?:www\.?youtube\.com/watch\?v=|youtu\.be/)["\w\-]+'))
 async def handle_video_link(message: types.Message, state: FSMContext):

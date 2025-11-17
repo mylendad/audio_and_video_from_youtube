@@ -2,16 +2,12 @@ import logging
 import asyncio
 
 from aiogram import Dispatcher
-from audio import AsyncIOScheduler, db, bot, schedule_cookie_update, logger
+from audio import db, bot, logger
 from handlers import bot as bot_handlers
 
 dp = Dispatcher()
 
 async def main():
-    scheduler = AsyncIOScheduler()
-    schedule_cookie_update(scheduler)
-    scheduler.start()
-
     dp.include_router(bot_handlers.router)
 
     logger.info("Бот запущен!")
