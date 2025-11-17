@@ -11,5 +11,6 @@ REQUIRED_CHANNELS = [ch for ch in env.list("REQUIRED_CHANNELS", default=[]) if c
 
 REDIS_HOST = env.str("REDIS_HOST", default="localhost")
 REDIS_PORT = env.int("REDIS_PORT", default=6379)
+HTTP_PORT = env.int("HTTP_PORT", 8080)
 
 COOKIE_FILE = "www.youtube.com_cookies.txt"

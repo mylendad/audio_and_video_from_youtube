@@ -12,8 +12,8 @@ CREATE_QUERY = """
     CREATE TABLE IF NOT EXISTS users (
         user_id bigint PRIMARY KEY,
         username varchar,
-        chat_id integer not null,
-        last_updated_date integer not null
+        chat_id bigint not null,
+        last_updated_date bigint not null
     );
 """
 
