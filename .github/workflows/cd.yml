@@ -12,7 +12,6 @@ jobs:
     # Required secrets:
     # - SSH_HOST: The IP address or hostname of your server.
     # - SSH_USER: The username for SSH login.
-    # - SSH_KEY: Your private SSH key.
     # - SSH_PORT: The port for SSH connection (default is 22).
     # - ENV_FILE: The content of your .env file.
     # - DEPLOY_PATH: The absolute path on the server where the project should be deployed (e.g., /home/user/app).
