@@ -41,6 +41,9 @@ jobs:
     - name: Run tests
       env:
         DB_DSN: "postgresql://test_user:test_pass@postgres:5432/test_db"
+        TOKEN: "dummy_token"
+        ADMIN_CHAT_ID: "12345"
+        ADMIN_USER_ID: "12345"
       run: pytest
 
   build:
