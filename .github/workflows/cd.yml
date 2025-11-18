@@ -1,0 +1,41 @@
+name: CD
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # This job requires secrets to be set in your GitHub repository settings.
+    # Go to Settings > Secrets and variables > Actions to add them.
+    #
+    # Required secrets:
+    # - SSH_HOST: The IP address or hostname of your server.
+    # - SSH_USER: The username for SSH login.
+    # - SSH_PORT: The port for SSH connection (default is 22).
+    # - ENV_FILE: The content of your .env file.
+    # - DEPLOY_PATH: The absolute path on the server where the project should be deployed (e.g., /home/user/app).
+    # - DEPLOY_COMMANDS: The commands to run on the server after deployment (e.g., 'docker-compose up -d --build').
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: 'main' # Explicitly check out the main branch
+
+    - name: Create .env file
+      if: ${{ secrets.ENV_FILE != '' }}
+      run: echo "${{ secrets.ENV_FILE }}" > .env
+
+    - name: Deploy to Server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        script: |
+          mkdir -p ${{ secrets.DEPLOY_PATH }}
+          rsync -avz --exclude='.git' --exclude='.github' ./ ${{ secrets.DEPLOY_PATH }}
+          cd ${{ secrets.DEPLOY_PATH }}
+          ${{ secrets.DEPLOY_COMMANDS }}
