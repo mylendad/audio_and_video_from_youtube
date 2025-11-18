@@ -24,10 +24,8 @@ jobs:
         ref: 'main' # Explicitly check out the main branch
 
     - name: Create .env file
-      env:
-        ENV_FILE: ${{ secrets.ENV_FILE }}
-      if: env.ENV_FILE != ''
-      run: echo "$ENV_FILE" > .env
+      if: ${{ secrets.ENV_FILE != '' }}
+      run: echo "${{ secrets.ENV_FILE }}" > .env
 
     - name: Sync files via rsync
       run: |
