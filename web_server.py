@@ -1,8 +1,6 @@
 import asyncio
 import aiohttp
-import http.server
-import socketserver
-import threading
+from aiohttp import web
 import os
 import logging
 import secrets
@@ -11,7 +9,6 @@ from config import HTTP_PORT
 
 logger = logging.getLogger(__name__)
 
-# Директория для временного хостинга файлов
 SERVE_DIR = "temp_serve"
 os.makedirs(SERVE_DIR, exist_ok=True)
 
@@ -28,38 +25,10 @@ async def get_public_ip() -> str:
         logger.error(f"Не удалось получить публичный IP: {e}")
         raise ConnectionError("Не удалось определить публичный IP-адрес сервера.") from e
 
-def create_file_handler(file_path, content_type):
-    """Создает кастомный обработчик запросов для одного файла с явным content_type."""
-    
-    class CustomFileHandler(http.server.SimpleHTTPRequestHandler):
-        def __init__(self, *args, **kwargs):
-            self.file_path = file_path
-            self.content_type = content_type
-            super().__init__(*args, **kwargs)
-
-        def do_GET(self):
-            if self.path.endswith(os.path.basename(self.file_path)):
-                try:
-                    with open(self.file_path, 'rb') as f:
-                        fs = os.fstat(f.fileno())
-                        
-                        self.send_response(200)
-                        self.send_header("Content-type", self.content_type)
-                        self.send_header("Content-Length", str(fs.st_size))
-                        self.end_headers()
-                        
-                        self.copyfile(f, self.wfile)
-                except FileNotFoundError:
-                    self.send_error(404, "File not found")
-            else:
-                self.send_error(404, "File not found")
-
-    return CustomFileHandler
-
 @asynccontextmanager
 async def public_file_server(original_path: str, content_type: str = 'application/octet-stream'):
     """
-    Асинхронный контекстный менеджер для временной публикации файла по HTTP.
+    Асинхронный контекстный менеджер для временной публикации файла с использованием aiohttp.
     """
     if not os.path.exists(original_path):
         raise FileNotFoundError(f"Файл для публикации не найден: {original_path}")
@@ -72,32 +41,26 @@ async def public_file_server(original_path: str, content_type: str = 'applicatio
     
     os.rename(original_path, served_path)
 
-    # Создаем обработчик для конкретного файла с явным content_type
-    Handler = create_file_handler(served_path, content_type)
+    async def handle_get(request: web.Request):
+        logger.info(f"[AIOHTTP_SERVER] Получен запрос: {request.path}")
+        return web.FileResponse(path=served_path, headers={"Content-Type": content_type})
 
-    httpd = None
-    server_thread = None
+    app = web.Application()
+    app.router.add_get(f"/{random_filename}", handle_get)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    
     public_url = f"http://{public_ip}:{port}/{random_filename}"
     
     try:
-        httpd = socketserver.TCPServer(("", port), Handler)
-        
-        server_thread = threading.Thread(target=httpd.serve_forever)
-        server_thread.daemon = True
-        server_thread.start()
-        
-        logger.info(f"Файл доступен по временному URL: {public_url}")
-        
+        await site.start()
+        logger.info(f"Файл доступен по временному URL (aiohttp): {public_url}")
         yield public_url
-        
     finally:
-        logger.info("Остановка временного HTTP-сервера...")
-        if httpd:
-            httpd.shutdown()
-            httpd.server_close()
-        if server_thread:
-            server_thread.join(timeout=5)
-        
+        logger.info("Остановка временного aiohttp-сервера...")
+        await runner.cleanup()
         if os.path.exists(served_path):
             try:
                 os.remove(served_path)
