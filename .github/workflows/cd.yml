@@ -6,7 +6,6 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production 
     # This job requires secrets to be set in your GitHub repository settings.
     # Go to Settings > Secrets and variables > Actions to add them.
     #
@@ -30,25 +29,25 @@ jobs:
       if: env.ENV_FILE != ''
       run: echo "$ENV_FILE" > .env
 
-    - name: Debug Secrets
-      env:
-        SSH_KEY_ENV: ${{ secrets.SSH_KEY }}
-        SSH_HOST_ENV: ${{ secrets.SSH_HOST }}
-        SSH_USER_ENV: ${{ secrets.SSH_USER }}
+    - name: Advanced Debug
       run: |
-        echo "User: $SSH_USER_ENV"
-        echo "Host: $SSH_HOST_ENV"
-        echo "Key length: ${#SSH_KEY_ENV}"
-        echo "First 10 chars of key: ${SSH_KEY_ENV:0:10}"
+        echo "${{ secrets.SSH_USER }}" > user.txt
+        echo "${{ secrets.SSH_HOST }}" > host.txt
+        echo "${{ secrets.SSH_KEY }}" > key.txt
+        echo "--- File sizes ---"
+        ls -l *.txt
+        echo "--- Host file content ---"
+        cat host.txt
+        echo "--- User file content ---"
+        cat user.txt
+        echo "--- First line of key file ---"
+        head -n 1 key.txt
 
     - name: Deploy to Server
       uses: appleboy/ssh-action@v1.0.3
-      env:
-        SSH_HOST_ENV: ${{ secrets.SSH_HOST }}
-        SSH_USER_ENV: ${{ secrets.SSH_USER }}
       with:
-        host: ${{ env.SSH_HOST_ENV }}
-        username: ${{ env.SSH_USER_ENV }}
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
         key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT }}
         script: |
