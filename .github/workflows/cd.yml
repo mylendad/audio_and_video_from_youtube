@@ -24,8 +24,10 @@ jobs:
         ref: 'main' # Explicitly check out the main branch
 
     - name: Create .env file
-      if: ${{ secrets.ENV_FILE != '' }}
-      run: echo "${{ secrets.ENV_FILE }}" > .env
+      env:
+        ENV_FILE: ${{ secrets.ENV_FILE }}
+      if: env.ENV_FILE != ''
+      run: echo "$ENV_FILE" > .env
 
     - name: Deploy to Server
       uses: appleboy/ssh-action@v1.0.3
