@@ -18,3 +18,7 @@ dependencies = [
     "psycopg2-binary==2.9.9",
     "pytest-mock==3.14.0",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["clients*", "handlers*", "lib*"]
