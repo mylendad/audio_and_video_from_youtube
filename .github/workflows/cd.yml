@@ -43,9 +43,12 @@ jobs:
 
     - name: Deploy to Server
       uses: appleboy/ssh-action@v1.0.3
+      env:
+        SSH_HOST_ENV: ${{ secrets.SSH_HOST }}
+        SSH_USER_ENV: ${{ secrets.SSH_USER }}
       with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
+        host: ${{ env.SSH_HOST_ENV }}
+        username: ${{ env.SSH_USER_ENV }}
         key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT }}
         script: |
