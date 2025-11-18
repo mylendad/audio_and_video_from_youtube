@@ -29,26 +29,19 @@ jobs:
       if: env.ENV_FILE != ''
       run: echo "$ENV_FILE" > .env
 
-    - name: Advanced Debug
+    - name: Prepare Credentials
       run: |
         echo "${{ secrets.SSH_USER }}" > user.txt
         echo "${{ secrets.SSH_HOST }}" > host.txt
         echo "${{ secrets.SSH_KEY }}" > key.txt
-        echo "--- File sizes ---"
-        ls -l *.txt
-        echo "--- Host file content ---"
-        cat host.txt
-        echo "--- User file content ---"
-        cat user.txt
-        echo "--- First line of key file ---"
-        head -n 1 key.txt
+        chmod 600 key.txt
 
     - name: Deploy to Server
       uses: appleboy/ssh-action@v1.0.3
       with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_KEY }}
+        host: $(cat host.txt)
+        username: $(cat user.txt)
+        key_path: key.txt
         port: ${{ secrets.SSH_PORT }}
         script: |
           mkdir -p ${{ secrets.DEPLOY_PATH }}
