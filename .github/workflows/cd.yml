@@ -29,17 +29,13 @@ jobs:
       if: env.ENV_FILE != ''
       run: echo "$ENV_FILE" > .env
 
-    - name: Deploy files via rsync
-      uses: appleboy/rsync-deploy@v1.0.0
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_KEY }}
-        port: ${{ secrets.SSH_PORT }}
-        source: "./"
-        target: "${{ secrets.DEPLOY_PATH }}"
-        flags: "avz"
-        exclude: ".git,.github"
+    - name: Sync files via rsync
+      run: |
+        echo "${{ secrets.SSH_KEY }}" > key.txt
+        chmod 600 key.txt
+        mkdir -p ~/.ssh
+        ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+        rsync -avz -e "ssh -i key.txt -p ${{ secrets.SSH_PORT }}" --exclude='.git' --exclude='.github' ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}"
 
     - name: Run deployment commands
       uses: appleboy/ssh-action@v1.0.3
