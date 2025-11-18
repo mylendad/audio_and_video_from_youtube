@@ -29,25 +29,12 @@ jobs:
       if: env.ENV_FILE != ''
       run: echo "$ENV_FILE" > .env
 
-    - name: Prepare Credentials
-      run: |
-        echo "${{ secrets.SSH_USER }}" > user.txt
-        echo "${{ secrets.SSH_HOST }}" > host.txt
-        echo "${{ secrets.SSH_KEY }}" > key.txt
-        chmod 600 key.txt
-
-    - name: Load Credentials
-      id: creds
-      run: |
-        echo "host=$(cat host.txt)" >> $GITHUB_OUTPUT
-        echo "user=$(cat user.txt)" >> $GITHUB_OUTPUT
-
     - name: Deploy to Server
       uses: appleboy/ssh-action@v1.0.3
       with:
-        host: ${{ steps.creds.outputs.host }}
-        username: ${{ steps.creds.outputs.user }}
-        key_path: key.txt
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT }}
         script: |
           mkdir -p ${{ secrets.DEPLOY_PATH }}
