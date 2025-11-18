@@ -36,11 +36,17 @@ jobs:
         echo "${{ secrets.SSH_KEY }}" > key.txt
         chmod 600 key.txt
 
+    - name: Load Credentials
+      id: creds
+      run: |
+        echo "host=$(cat host.txt)" >> $GITHUB_OUTPUT
+        echo "user=$(cat user.txt)" >> $GITHUB_OUTPUT
+
     - name: Deploy to Server
       uses: appleboy/ssh-action@v1.0.3
       with:
-        host: $(cat host.txt)
-        username: $(cat user.txt)
+        host: ${{ steps.creds.outputs.host }}
+        username: ${{ steps.creds.outputs.user }}
         key_path: key.txt
         port: ${{ secrets.SSH_PORT }}
         script: |
