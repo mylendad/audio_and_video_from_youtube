@@ -30,7 +30,7 @@ jobs:
       run: echo "$ENV_FILE" > .env
 
     - name: Deploy files via rsync
-      uses: appleboy/rsync-deploy@v1
+      uses: appleboy/rsync-deploy@v1.0.0
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
