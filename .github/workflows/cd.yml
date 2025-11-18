@@ -6,6 +6,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: production 
     # This job requires secrets to be set in your GitHub repository settings.
     # Go to Settings > Secrets and variables > Actions to add them.
     #
