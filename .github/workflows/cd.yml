@@ -22,7 +22,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        ref: 'main' # Explicitly check out the main branch
+        ref: 'main' 
 
     - name: Create .env file
       env:
@@ -41,7 +41,17 @@ jobs:
         echo "Key length: ${#SSH_KEY_ENV}"
         echo "First 10 chars of key: ${SSH_KEY_ENV:0:10}"
 
-    - name: Deploy to Server
+    - name: Copy files to server
+      uses: appleboy/scp-action@v0.1.4 
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        source: "." 
+        target: ${{ secrets.DEPLOY_PATH }}
+
+    - name: Deploy on server
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.SSH_HOST }}
@@ -49,7 +59,5 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT }}
         script: |
-          mkdir -p ${{ secrets.DEPLOY_PATH }}
-          rsync -avz --exclude='.git' --exclude='.github' --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='*.egg-info/' --exclude='tests/' --exclude='conftest.py' --exclude='pyproject.toml' --exclude='generate_cookies.py' --exclude='install_docker.sh' --exclude='user1@82.202.142.16' ./ ${{ secrets.DEPLOY_PATH }}
           cd ${{ secrets.DEPLOY_PATH }}
           ${{ secrets.DEPLOY_COMMANDS }}
