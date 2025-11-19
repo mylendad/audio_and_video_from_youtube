@@ -59,5 +59,21 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT }}
         script: |
+          echo "--- Starting deployment script ---"
+          echo "Changing to directory: ${{ secrets.DEPLOY_PATH }}"
           cd ${{ secrets.DEPLOY_PATH }}
+          
+          echo "Current directory:"
+          pwd
+          
+          echo "--- Listing contents BEFORE touch ---"
+          ls -la
+          
+          echo "--- Creating cookie file ---"
+          touch www.youtube.com_cookies.txt
+          
+          echo "--- Listing contents AFTER touch ---"
+          ls -la
+          
+          echo "--- Running deployment commands ---"
           ${{ secrets.DEPLOY_COMMANDS }}
