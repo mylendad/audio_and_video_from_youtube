@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir .
 
 COPY . .
 
-RUN useradd -m appuserapp
+RUN useradd -m appuser
 RUN chown -R appuser:appuser /app
 USER appuser
 
