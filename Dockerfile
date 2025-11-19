@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir setuptools wheel
 
 COPY pyproject.toml .
 
-RUN pip install --no-cache-dir .
+RUN pip install --timeout=300 .
 
 COPY . .
 
