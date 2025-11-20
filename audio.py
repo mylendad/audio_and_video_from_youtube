@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timezone
 from lib import browser_cookie3
 import logging
+import mimetypes
 
 from aiogram import Bot, F, types
 from aiogram.filters import Command
@@ -326,11 +327,10 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
             logger.info("Файл больше 50 МБ, будет использован временный сервер.")
             await status_message.edit_text("Файл слишком большой. Запускаю временный сервер для отправки...")
             try:
-                content_type = 'application/octet-stream'
-                if format_config['send_method'] == 'send_audio':
-                    content_type = 'audio/mpeg'
-                elif format_config['send_method'] == 'send_video':
-                    content_type = 'video/mp4'
+                mimetypes.init()
+                content_type, _ = mimetypes.guess_type(final_path)
+                if content_type is None:
+                    content_type = 'application/octet-stream'
 
                 async with public_file_server(final_path, content_type=content_type) as public_url:
                     await status_message.edit_text(f"Отправка большого файла. Ссылка будет действительна несколько минут...")

@@ -60,9 +60,9 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         script: |
           cd ${{ secrets.DEPLOY_PATH }}
-          
+
           sudo rm -rf www.youtube.com_cookies.txt
-          
+
           touch www.youtube.com_cookies.txt
-          
+
           ${{ secrets.DEPLOY_COMMANDS }}
