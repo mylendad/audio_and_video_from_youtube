@@ -27,6 +27,7 @@ from generate_cookies import export_youtube_cookies_to_txt
 from redis_lock import acquire_user_lock, release_user_lock
 from clients.async_user_actioner import AsyncUserActioner
 from clients.pg_client import AsyncPostgresClient
+from clients.storage_client import storage_client
 
 from config import TOKEN, ADMIN_CHAT_ID, ADMIN_USER_ID, DB_DSN, REQUIRED_CHANNELS, COOKIE_FILE
 from constants import FORMATS
@@ -324,29 +325,23 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
             else:
                 await message.answer_document(fs_file)
         else:
-            logger.info("Файл больше 50 МБ, будет использован временный сервер.")
-            await status_message.edit_text("Файл слишком большой. Запускаю временный сервер для отправки...")
+            logger.info("Файл больше 50 МБ, загрузка на удаленное хранилище.")
+            await status_message.edit_text("Файл слишком большой. Загружаю на внешнее хранилище...")
             try:
-                mimetypes.init()
-                content_type, _ = mimetypes.guess_type(final_path)
-                if content_type is None:
-                    content_type = 'application/octet-stream'
-
-                async with public_file_server(final_path, content_type=content_type) as public_url:
-                    await status_message.edit_text(f"Отправка большого файла. Ссылка будет действительна несколько минут...")
-                                        
-                    if format_config['send_method'] == 'send_audio':
-                        await message.answer_audio(public_url, request_timeout=1800)
-                    elif format_config['send_method'] == 'send_video':
-                        await message.answer_video(public_url, request_timeout=1800)
-                    else:
-                        await message.answer_document(public_url, request_timeout=1800)
+                public_url = await storage_client.upload_file(final_path)
                 
-                final_path = None
-
+                await status_message.edit_text(f"Отправка большого файла...")
+                                    
+                if format_config['send_method'] == 'send_audio':
+                    await message.answer_audio(public_url, request_timeout=1800)
+                elif format_config['send_method'] == 'send_video':
+                    await message.answer_video(public_url, request_timeout=1800)
+                else:
+                    await message.answer_document(public_url, request_timeout=1800)
+                
             except Exception as e:
-                logger.error(f"Ошибка при работе временного сервера: {e}", exc_info=True)
-                await message.answer(f"Не удалось отправить большой файл из-за внутренней ошибки сервера: {e}")
+                logger.error(f"Ошибка при загрузке на хранилище: {e}", exc_info=True)
+                await message.answer(f"Не удалось загрузить большой файл на удаленное хранилище: {e}")
 
     except Exception as e:
         logger.error(f"Ошибка при скачивании/отправке: {e}", exc_info=True)
@@ -372,11 +367,12 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         release_user_lock(user_id)
         if final_path and os.path.exists(final_path):
             try:
+                time.sleep(300)
                 os.remove(final_path)
                 logger.info(f"Удален временный файл: {final_path}")
             except Exception as e:
                 logger.warning(f"Ошибка при удалении {final_path}: {e}")
-        
+        удален
         temp_files = glob.glob(f"{base_filename}*")
         for temp_file in temp_files:
             if temp_file != final_path and os.path.exists(temp_file):
