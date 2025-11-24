@@ -14,6 +14,9 @@ services:
       - /home/mylendad/.ssh/id_ed25519:/app/id_ed25519:ro
     ports:
       - "8080:8080"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
 
   db:
     image: postgres:16-alpine

@@ -57,7 +57,9 @@ class StorageClient:
                 logger.info(f"Uploading {local_path} to {remote_file_path}...")
                 async with conn.start_sftp_client() as sftp:
                     await sftp.put(local_path, remote_file_path)
-                logger.info("File uploaded successfully.")
+                    # Устанавливаем права на файл, чтобы веб-сервер мог его прочитать
+                    await sftp.chmod(remote_file_path, 0o644)
+                logger.info("File uploaded and permissions set successfully.")
 
             public_url = urljoin(self.url_prefix, file_name)
             logger.info(f"File is available at public URL: {public_url}")

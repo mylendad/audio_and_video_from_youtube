@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from lib import browser_cookie3
 import logging
 import mimetypes
+# import aiohttp
 
 from aiogram import Bot, F, types
 from aiogram.filters import Command
@@ -13,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import URLInputFile
 import glob
 
@@ -47,7 +48,22 @@ user_actioner = AsyncUserActioner(db)
 
 class DownloadState(StatesGroup):
     waiting_for_format = State()
-    
+
+# async def debug_url(url: str):
+#     logger.info(f"--- DEBUGGING URL: {url} ---")
+#     try:
+#         async with aiohttp.ClientSession() as session:
+#             async with session.get(url) as response:
+#                 logger.info(f"DEBUG: Status: {response.status}")
+#                 logger.info("DEBUG: Headers:")
+#                 for key, value in response.headers.items():
+#                     logger.info(f"  {key}: {value}")
+#                 
+#                 content_preview = await response.content.read(512)
+#                 logger.info(f"DEBUG: Content Preview (first 512 bytes): {content_preview.decode('utf-8', errors='ignore')}")
+#     except Exception as e:
+#         logger.error(f"DEBUG: Error while fetching URL: {e}", exc_info=True)
+#     logger.info("--- END DEBUGGING ---")
    
 def format_size(size_bytes: int) -> str:
     if size_bytes == 0:
@@ -62,6 +78,7 @@ def format_size(size_bytes: int) -> str:
         i += 1
         
     return f"{size:.2f} {units[i]}"  
+
 
 def is_youtube_url(url: str) -> bool:
     """Checks if the given URL is a valid YouTube URL."""
@@ -325,13 +342,17 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
             else:
                 await message.answer_document(fs_file)
         else:
-            logger.info("Файл больше 50 МБ, загрузка на удаленное хранилище.")
-            await status_message.edit_text("Файл слишком большой. Загружаю на внешнее хранилище...")
+            logger.info("Файл > 50 МБ. Загрузка на удаленное хранилище для получения ссылки.")
+            await status_message.edit_text("Загрузка большого файла на сервер...")
+
             try:
                 public_url = await storage_client.upload_file(final_path)
-                
-                await status_message.edit_text(f"Отправка большого файла...")
-                                    
+                logger.info(f"Файл загружен, получен URL: {public_url}")
+
+                # URL перед отправкой в Telegram
+                # await debug_url(public_url)
+
+                await status_message.edit_text("Отправка файла в Telegram...")
                 if format_config['send_method'] == 'send_audio':
                     await message.answer_audio(public_url, request_timeout=1800)
                 elif format_config['send_method'] == 'send_video':
@@ -339,9 +360,18 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
                 else:
                     await message.answer_document(public_url, request_timeout=1800)
                 
+                await status_message.delete()
+
             except Exception as e:
-                logger.error(f"Ошибка при загрузке на хранилище: {e}", exc_info=True)
-                await message.answer(f"Не удалось загрузить большой файл на удаленное хранилище: {e}")
+                logger.error(f"Ошибка при обработке большого файла: {e}", exc_info=True)
+                await message.answer(f"Не удалось обработать большой файл. Ошибка: {e}")
+                # Ошибку не перевыбрасываем, чтобы выполнился блок finally для очистки,
+                # но пользователь уже уведомлен.
+
+
+    except TelegramForbiddenError:
+        logger.warning(f"Bot is blocked by user {user_id}. Aborting download process.")
+        await state.clear()
 
     except Exception as e:
         logger.error(f"Ошибка при скачивании/отправке: {e}", exc_info=True)
@@ -358,7 +388,10 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         elif "Copyright" in str(e):
             error_message += "\n\Видео содержит защищенный авторским правом контент."
         
-        await message.answer(error_message)
+        try:
+            await message.answer(error_message)
+        except TelegramForbiddenError:
+            logger.warning(f"Bot is blocked by user {user_id}. Could not send final error message.")
         
         await state.clear()
 
@@ -367,12 +400,11 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         release_user_lock(user_id)
         if final_path and os.path.exists(final_path):
             try:
-                time.sleep(300)
                 os.remove(final_path)
                 logger.info(f"Удален временный файл: {final_path}")
             except Exception as e:
                 logger.warning(f"Ошибка при удалении {final_path}: {e}")
-        удален
+        
         temp_files = glob.glob(f"{base_filename}*")
         for temp_file in temp_files:
             if temp_file != final_path and os.path.exists(temp_file):
