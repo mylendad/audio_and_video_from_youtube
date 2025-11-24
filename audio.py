@@ -346,20 +346,17 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
             await status_message.edit_text("Загрузка большого файла на сервер...")
 
             try:
+                # 1. Загрузка на удаленное хранилище и получение URL
                 public_url = await storage_client.upload_file(final_path)
                 logger.info(f"Файл загружен, получен URL: {public_url}")
 
-                # URL перед отправкой в Telegram
-                # await debug_url(public_url)
-
-                await status_message.edit_text("Отправка файла в Telegram...")
-                if format_config['send_method'] == 'send_audio':
-                    await message.answer_audio(public_url, request_timeout=1800)
-                elif format_config['send_method'] == 'send_video':
-                    await message.answer_video(public_url, request_timeout=1800)
-                else:
-                    await message.answer_document(public_url, request_timeout=1800)
-                
+                # 2. Отправка ссылки пользователю для отладки
+                await status_message.edit_text("Отправка ссылки на файл...")
+                await message.answer(
+                    f"Файл слишком большой для автоматической отправки.\n\n"
+                    f"Вы можете скачать его по прямой ссылке (отладочный режим):\n"
+                    f"{public_url}"
+                )
                 await status_message.delete()
 
             except Exception as e:
