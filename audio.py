@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from lib import browser_cookie3
 import logging
 import mimetypes
+# import aiohttp
 
 from aiogram import Bot, F, types
 from aiogram.filters import Command
@@ -13,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import URLInputFile
 import glob
 
@@ -27,6 +28,7 @@ from generate_cookies import export_youtube_cookies_to_txt
 from redis_lock import acquire_user_lock, release_user_lock
 from clients.async_user_actioner import AsyncUserActioner
 from clients.pg_client import AsyncPostgresClient
+from clients.storage_client import storage_client
 
 from config import TOKEN, ADMIN_CHAT_ID, ADMIN_USER_ID, DB_DSN, REQUIRED_CHANNELS, COOKIE_FILE
 from constants import FORMATS
@@ -46,7 +48,22 @@ user_actioner = AsyncUserActioner(db)
 
 class DownloadState(StatesGroup):
     waiting_for_format = State()
-    
+
+# async def debug_url(url: str):
+#     logger.info(f"--- DEBUGGING URL: {url} ---")
+#     try:
+#         async with aiohttp.ClientSession() as session:
+#             async with session.get(url) as response:
+#                 logger.info(f"DEBUG: Status: {response.status}")
+#                 logger.info("DEBUG: Headers:")
+#                 for key, value in response.headers.items():
+#                     logger.info(f"  {key}: {value}")
+#                 
+#                 content_preview = await response.content.read(512)
+#                 logger.info(f"DEBUG: Content Preview (first 512 bytes): {content_preview.decode('utf-8', errors='ignore')}")
+#     except Exception as e:
+#         logger.error(f"DEBUG: Error while fetching URL: {e}", exc_info=True)
+#     logger.info("--- END DEBUGGING ---")
    
 def format_size(size_bytes: int) -> str:
     if size_bytes == 0:
@@ -61,6 +78,7 @@ def format_size(size_bytes: int) -> str:
         i += 1
         
     return f"{size:.2f} {units[i]}"  
+
 
 def is_youtube_url(url: str) -> bool:
     """Checks if the given URL is a valid YouTube URL."""
@@ -324,29 +342,33 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
             else:
                 await message.answer_document(fs_file)
         else:
-            logger.info("Файл больше 50 МБ, будет использован временный сервер.")
-            await status_message.edit_text("Файл слишком большой. Запускаю временный сервер для отправки...")
-            try:
-                mimetypes.init()
-                content_type, _ = mimetypes.guess_type(final_path)
-                if content_type is None:
-                    content_type = 'application/octet-stream'
+            logger.info("Файл > 50 МБ. Загрузка на удаленное хранилище для получения ссылки.")
+            await status_message.edit_text("Загрузка большого файла на сервер...")
 
-                async with public_file_server(final_path, content_type=content_type) as public_url:
-                    await status_message.edit_text(f"Отправка большого файла. Ссылка будет действительна несколько минут...")
-                                        
-                    if format_config['send_method'] == 'send_audio':
-                        await message.answer_audio(public_url, request_timeout=1800)
-                    elif format_config['send_method'] == 'send_video':
-                        await message.answer_video(public_url, request_timeout=1800)
-                    else:
-                        await message.answer_document(public_url, request_timeout=1800)
-                
-                final_path = None
+            try:
+                # 1. Загрузка на удаленное хранилище и получение URL
+                public_url = await storage_client.upload_file(final_path)
+                logger.info(f"Файл загружен, получен URL: {public_url}")
+
+                # 2. Отправка ссылки пользователю для отладки
+                await status_message.edit_text("Отправка ссылки на файл...")
+                await message.answer(
+                    f"Файл слишком большой для автоматической отправки.\n\n"
+                    f"Вы можете скачать его по прямой ссылке (отладочный режим):\n"
+                    f"{public_url}"
+                )
+                await status_message.delete()
 
             except Exception as e:
-                logger.error(f"Ошибка при работе временного сервера: {e}", exc_info=True)
-                await message.answer(f"Не удалось отправить большой файл из-за внутренней ошибки сервера: {e}")
+                logger.error(f"Ошибка при обработке большого файла: {e}", exc_info=True)
+                await message.answer(f"Не удалось обработать большой файл. Ошибка: {e}")
+                # Ошибку не перевыбрасываем, чтобы выполнился блок finally для очистки,
+                # но пользователь уже уведомлен.
+
+
+    except TelegramForbiddenError:
+        logger.warning(f"Bot is blocked by user {user_id}. Aborting download process.")
+        await state.clear()
 
     except Exception as e:
         logger.error(f"Ошибка при скачивании/отправке: {e}", exc_info=True)
@@ -363,7 +385,10 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         elif "Copyright" in str(e):
             error_message += "\n\Видео содержит защищенный авторским правом контент."
         
-        await message.answer(error_message)
+        try:
+            await message.answer(error_message)
+        except TelegramForbiddenError:
+            logger.warning(f"Bot is blocked by user {user_id}. Could not send final error message.")
         
         await state.clear()
 
