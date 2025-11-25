@@ -42,7 +42,13 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT }}
         script: |
+          echo "--- Debugging .env creation ---"
+          echo "Changing to directory: ${{ secrets.DEPLOY_PATH }}"
           cd ${{ secrets.DEPLOY_PATH }}
+          echo "Current directory is: $(pwd)"
+          echo "Listing files in current directory:"
+          ls -la
+          echo "--- Populating .env file ---"
           echo "TOKEN=${{ secrets.TOKEN }}" > .env
           echo "ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}" >> .env
           echo "ADMIN_USER_ID=${{ secrets.ADMIN_USER_ID }}" >> .env
@@ -57,6 +63,9 @@ jobs:
           echo "STORAGE_PASSWORD=${{ secrets.STORAGE_PASSWORD }}" >> .env
           echo "STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}" >> .env
           echo "STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}" >> .env
+          echo "--- Verifying .env file content ---"
+          cat .env
+          echo "--- End of .env debug ---"
 
     - name: Deploy on server
       uses: appleboy/ssh-action@v1.0.3
