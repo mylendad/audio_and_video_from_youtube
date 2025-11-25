@@ -24,23 +24,6 @@ jobs:
       with:
         ref: 'main' 
 
-    - name: Create .env file
-      env:
-        ENV_FILE: ${{ secrets.ENV_FILE }}
-      if: env.ENV_FILE != ''
-      run: echo "$ENV_FILE" > .env
-
-    - name: Debug Secrets
-      env:
-        SSH_KEY_ENV: ${{ secrets.SSH_KEY }}
-        SSH_HOST_ENV: ${{ secrets.SSH_HOST }}
-        SSH_USER_ENV: ${{ secrets.SSH_USER }}
-      run: |
-        echo "User1: $SSH_USER_ENV"
-        echo "Host: $SSH_HOST_ENV"
-        echo "Key length: ${#SSH_KEY_ENV}"
-        echo "First 10 chars of key: ${SSH_KEY_ENV:0:10}"
-
     - name: Copy files to server
       uses: appleboy/scp-action@v0.1.4 
       with:
@@ -50,6 +33,30 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         source: "." 
         target: ${{ secrets.DEPLOY_PATH }}
+
+    - name: Create .env file on server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        script: |
+          cd ${{ secrets.DEPLOY_PATH }}
+          echo "TOKEN=${{ secrets.TOKEN }}" > .env
+          echo "ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}" >> .env
+          echo "ADMIN_USER_ID=${{ secrets.ADMIN_USER_ID }}" >> .env
+          echo "DB_DSN=${{ secrets.DB_DSN }}" >> .env
+          echo "REQUIRED_CHANNELS='${{ secrets.REQUIRED_CHANNELS }}'" >> .env
+          echo "REDIS_HOST=${{ secrets.REDIS_HOST }}" >> .env
+          echo "REDIS_PORT=${{ secrets.REDIS_PORT }}" >> .env
+          echo "WEB_SERVER_PORT=${{ secrets.WEB_SERVER_PORT }}" >> .env
+          echo "STORAGE_HOST=${{ secrets.STORAGE_HOST }}" >> .env
+          echo "STORAGE_PORT=${{ secrets.STORAGE_PORT }}" >> .env
+          echo "STORAGE_USER=${{ secrets.STORAGE_USER }}" >> .env
+          echo "STORAGE_PASSWORD=${{ secrets.STORAGE_PASSWORD }}" >> .env
+          echo "STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}" >> .env
+          echo "STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}" >> .env
 
     - name: Deploy on server
       uses: appleboy/ssh-action@v1.0.3
