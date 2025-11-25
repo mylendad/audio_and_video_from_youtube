@@ -6,33 +6,21 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production 
-    # This job requires secrets to be set in your GitHub repository settings.
-    # Go to Settings > Secrets and variables > Actions to add them.
-    #
-    # Required secrets:
-    # - SSH_HOST: The IP address or hostname of your server.
-    # - SSH_USER: The username for SSH login.
-    # - SSH_PORT: The port for SSH connection (default is 22).
-    # - SSH_KEY: Your private SSH key.
-    # - DEPLOY_PATH: The absolute path on the server where the project should be deployed (e.g., /home/user/app).
-    # - DEPLOY_COMMANDS: The commands to run on the server after deployment (e.g., 'docker-compose up -d --build').
-    # - And all secrets for the .env file (TOKEN, ADMIN_CHAT_ID, etc.).
-
+    environment: production
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        ref: 'main' 
+        ref: 'main'
 
     - name: Copy files to server
-      uses: appleboy/scp-action@v0.1.4 
+      uses: appleboy/scp-action@v0.1.4
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT }}
-        source: "." 
+        source: "."
         target: ${{ secrets.DEPLOY_PATH }}
 
     - name: Create .env file on server
@@ -70,9 +58,6 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         script: |
           cd ${{ secrets.DEPLOY_PATH }}
-
           sudo rm -rf www.youtube.com_cookies.txt
-
           touch www.youtube.com_cookies.txt
-
           ${{ secrets.DEPLOY_COMMANDS }}
