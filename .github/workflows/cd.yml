@@ -36,22 +36,6 @@ jobs:
 
     - name: Create .env file on server
       uses: appleboy/ssh-action@v1.0.3
-      env:
-        ENV_FILE_CONTENT: |
-          TOKEN=${{ secrets.TOKEN }}
-          ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}
-          ADMIN_USER_ID=${{ secrets.ADMIN_USER_ID }}
-          DB_DSN='${{ secrets.DB_DSN }}'
-          REQUIRED_CHANNELS='${{ secrets.REQUIRED_CHANNELS }}'
-          REDIS_HOST=${{ secrets.REDIS_HOST }}
-          REDIS_PORT=${{ secrets.REDIS_PORT }}
-          WEB_SERVER_PORT=${{ secrets.WEB_SERVER_PORT }}
-          STORAGE_HOST=${{ secrets.STORAGE_HOST }}
-          STORAGE_PORT=${{ secrets.STORAGE_PORT }}
-          STORAGE_USER=${{ secrets.STORAGE_USER }}
-          STORAGE_PASSWORD='${{ secrets.STORAGE_PASSWORD }}'
-          STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}
-          STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
@@ -59,9 +43,20 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         script: |
           cd ${{ secrets.DEPLOY_PATH }}
-          echo "$ENV_FILE_CONTENT" > .env
-          echo "Successfully created .env file."
-          cat .env
+          echo "TOKEN=${{ secrets.TOKEN }}" > .env
+          echo "ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}" >> .env
+          echo "ADMIN_USER_ID=${{ secrets.ADMIN_USER_ID }}" >> .env
+          echo "DB_DSN=${{ secrets.DB_DSN }}" >> .env
+          echo "REQUIRED_CHANNELS='${{ secrets.REQUIRED_CHANNELS }}'" >> .env
+          echo "REDIS_HOST=${{ secrets.REDIS_HOST }}" >> .env
+          echo "REDIS_PORT=${{ secrets.REDIS_PORT }}" >> .env
+          echo "WEB_SERVER_PORT=${{ secrets.WEB_SERVER_PORT }}" >> .env
+          echo "STORAGE_HOST=${{ secrets.STORAGE_HOST }}" >> .env
+          echo "STORAGE_PORT=${{ secrets.STORAGE_PORT }}" >> .env
+          echo "STORAGE_USER=${{ secrets.STORAGE_USER }}" >> .env
+          echo "STORAGE_PASSWORD=${{ secrets.STORAGE_PASSWORD }}" >> .env
+          echo "STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}" >> .env
+          echo "STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}" >> .env
 
     - name: Deploy on server
       uses: appleboy/ssh-action@v1.0.3
