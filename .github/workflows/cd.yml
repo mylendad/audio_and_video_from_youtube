@@ -115,6 +115,7 @@ jobs:
           STORAGE_PASSWORD=${{ secrets.STORAGE_PASSWORD }}
           STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}
           STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}
+          SSH_KEY_HOST_PATH=${{ secrets.SSH_KEY_HOST_PATH }}
           EOF
           echo ".env file created."
           
