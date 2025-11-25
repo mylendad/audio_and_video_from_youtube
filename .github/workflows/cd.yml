@@ -25,13 +25,13 @@ jobs:
         ref: 'main' 
 
     - name: Copy files to server
-      uses: appleboy/scp-action@v0.1.4 
+      uses: appleboy/scp-action@v0.1.4
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT }}
-        source: "." 
+        source: "."
         target: ${{ secrets.DEPLOY_PATH }}
 
     - name: Create .env file on server
@@ -76,9 +76,33 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         script: |
           cd ${{ secrets.DEPLOY_PATH }}
+          cat << EOF > .env
+          TOKEN=${{ secrets.TOKEN }}
+          ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}
+          ADMIN_USER_ID=${{ secrets.ADMIN_USER_ID }}
+          DB_DSN=${{ secrets.DB_DSN }}
+          REQUIRED_CHANNELS='${{ secrets.REQUIRED_CHANNELS }}'
+          REDIS_HOST=${{ secrets.REDIS_HOST }}
+          REDIS_PORT=${{ secrets.REDIS_PORT }}
+          WEB_SERVER_PORT=${{ secrets.WEB_SERVER_PORT }}
+          STORAGE_HOST=${{ secrets.STORAGE_HOST }}
+          STORAGE_PORT=${{ secrets.STORAGE_PORT }}
+          STORAGE_USER=${{ secrets.STORAGE_USER }}
+          STORAGE_PASSWORD=${{ secrets.STORAGE_PASSWORD }}
+          STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}
+          STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}
+          EOF
 
+    - name: Deploy on server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        script: |
+          cd ${{ secrets.DEPLOY_PATH }}
           sudo rm -rf www.youtube.com_cookies.txt
-
           touch www.youtube.com_cookies.txt
 
           ${{ secrets.DEPLOY_COMMANDS }}
