@@ -14,32 +14,16 @@ jobs:
     # - SSH_HOST: The IP address or hostname of your server.
     # - SSH_USER: The username for SSH login.
     # - SSH_PORT: The port for SSH connection (default is 22).
-    # - ENV_FILE: The content of your .env file.
+    # - SSH_KEY: Your private SSH key.
     # - DEPLOY_PATH: The absolute path on the server where the project should be deployed (e.g., /home/user/app).
     # - DEPLOY_COMMANDS: The commands to run on the server after deployment (e.g., 'docker-compose up -d --build').
-#fee
+    # - And all secrets for the .env file (TOKEN, ADMIN_CHAT_ID, etc.).
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         ref: 'main' 
-
-    - name: Create .env file
-      env:
-        ENV_FILE: ${{ secrets.ENV_FILE }}
-      if: env.ENV_FILE != ''
-      run: echo "$ENV_FILE" > .env
-
-    - name: Debug Secrets
-      env:
-        SSH_KEY_ENV: ${{ secrets.SSH_KEY }}
-        SSH_HOST_ENV: ${{ secrets.SSH_HOST }}
-        SSH_USER_ENV: ${{ secrets.SSH_USER }}
-      run: |
-        echo "User1: $SSH_USER_ENV"
-        echo "Host: $SSH_HOST_ENV"
-        echo "Key length: ${#SSH_KEY_ENV}"
-        echo "First 10 chars of key: ${SSH_KEY_ENV:0:10}"
 
     - name: Copy files to server
       uses: appleboy/scp-action@v0.1.4 
@@ -50,6 +34,32 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         source: "." 
         target: ${{ secrets.DEPLOY_PATH }}
+
+    - name: Create .env file on server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        script: |
+          cd ${{ secrets.DEPLOY_PATH }}
+          cat << EOF > .env
+          TOKEN=${{ secrets.TOKEN }}
+          ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}
+          ADMIN_USER_ID=${{ secrets.ADMIN_USER_ID }}
+          DB_DSN=${{ secrets.DB_DSN }}
+          REQUIRED_CHANNELS='${{ secrets.REQUIRED_CHANNELS }}'
+          REDIS_HOST=${{ secrets.REDIS_HOST }}
+          REDIS_PORT=${{ secrets.REDIS_PORT }}
+          WEB_SERVER_PORT=${{ secrets.WEB_SERVER_PORT }}
+          STORAGE_HOST=${{ secrets.STORAGE_HOST }}
+          STORAGE_PORT=${{ secrets.STORAGE_PORT }}
+          STORAGE_USER=${{ secrets.STORAGE_USER }}
+          STORAGE_PASSWORD=${{ secrets.STORAGE_PASSWORD }}
+          STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}
+          STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}
+          EOF
 
     - name: Deploy on server
       uses: appleboy/ssh-action@v1.0.3
