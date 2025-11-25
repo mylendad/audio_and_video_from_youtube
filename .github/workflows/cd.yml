@@ -13,6 +13,23 @@ jobs:
       with:
         ref: 'main'
 
+    - name: Clean up old version on server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        script: |
+          set -e
+          echo "Cleaning up deployment directory: ${{ secrets.DEPLOY_PATH }}"
+          cd ${{ secrets.DEPLOY_PATH }}
+          # Remove all visible files and directories
+          rm -rf *
+          # Remove all hidden files and directories (dotfiles)
+          rm -rf .[^.]* ..?*
+          echo "Cleanup complete."
+
     - name: Copy files to server
       uses: appleboy/scp-action@v0.1.4
       with:
@@ -31,7 +48,16 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         port: ${{ secrets.SSH_PORT }}
         script: |
+          set -e
+          echo "--- Starting .env creation step ---"
           cd ${{ secrets.DEPLOY_PATH }}
+          echo "Current directory: $(pwd)"
+          
+          echo "Checking write permissions..."
+          touch .gemini-write-test.tmp && rm .gemini-write-test.tmp
+          echo "Write permissions are OK."
+          
+          echo "Creating .env file..."
           cat << EOF > .env
           TOKEN=${{ secrets.TOKEN }}
           ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}
@@ -48,6 +74,14 @@ jobs:
           STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}
           STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}
           EOF
+          echo ".env file created."
+          
+          echo "--- Verifying .env file ---"
+          echo "File details:"
+          ls -l .env
+          echo "Content of .env file:"
+          cat .env
+          echo "--- End of .env creation step ---"
 
     - name: Deploy on server
       uses: appleboy/ssh-action@v1.0.3
