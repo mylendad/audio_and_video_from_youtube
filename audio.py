@@ -120,27 +120,19 @@ async def estimate_video_size(url: str, format_config: dict) -> int:
         return 0
 
 async def send_subscription_request(chat_id: int):
-    buttons = []
-    for channel in REQUIRED_CHANNELS:
-        buttons.append(types.InlineKeyboardButton(
-            text=f"Подписаться на {channel}", 
-            url=f"https://t.me/{channel[1:]}"
-        ))
-    buttons.append(types.InlineKeyboardButton(
-        text="Я подписался", 
-        callback_data="check_subscription_callback"
-    ))
-    
-    markup = types.InlineKeyboardMarkup(
-    inline_keyboard=[
-        [types.InlineKeyboardButton(...)]
-        for channel in REQUIRED_CHANNELS
-    ] + [[types.InlineKeyboardButton(text="Я подписался", callback_data="check_subscription_callback")]]
-)
-    
+    """Sends a message with inline buttons for required channel subscriptions."""
+    keyboard_rows = [
+        [types.InlineKeyboardButton(text=f"Подписаться на {channel.strip()}", url=f"https://t.me/{channel.strip().lstrip('@')}")]
+        for channel in REQUIRED_CHANNELS if channel.strip()
+    ]
+    keyboard_rows.append(
+        [types.InlineKeyboardButton(text="Я подписался", callback_data="check_subscription_callback")]
+    )
+    markup = types.InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+
     await bot.send_message(
-        chat_id, 
-        "Для использования бота необходимо подписаться на каналы:", 
+        chat_id,
+        "Для использования бота необходимо подписаться на каналы:",
         reply_markup=markup
     )
 
