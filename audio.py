@@ -164,16 +164,23 @@ async def ensure_user_exists(message_or_query: types.Message | types.CallbackQue
     return False
 
 async def is_user_subscribed(user_id: int) -> bool:
-    if not REQUIRED_CHANNELS: 
+    """Checks if the user is subscribed to all required channels."""
+    # Skip check if the list is not defined or contains only empty strings
+    if not REQUIRED_CHANNELS or not any(c.strip() for c in REQUIRED_CHANNELS):
         return True
-        
+
     for channel in REQUIRED_CHANNELS:
+        channel_name = channel.strip()
+        if not channel_name:
+            continue  # Skip any empty entries in the list
+
         try:
-            member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+            member = await bot.get_chat_member(chat_id=channel_name, user_id=user_id)
             if member.status not in ("member", "administrator", "creator"):
                 return False
         except Exception as e:
-            logger.warning(f"Ошибка при проверке подписки на {channel}: {e}")
+            logger.warning(f"Ошибка при проверке подписки на {channel_name}: {e}")
+            # If we can't check one channel, we assume failure for security.
             return False
     return True
 
