@@ -120,16 +120,36 @@ async def estimate_video_size(url: str, format_config: dict) -> int:
         return 0
 
 async def send_subscription_request(chat_id: int):
-    """Sends a message with inline buttons for required channel subscriptions."""
-    keyboard_rows = [
-        [types.InlineKeyboardButton(text=f"Подписаться на {channel.strip()}", url=f"https://t.me/{channel.strip().lstrip('@')}")]
-        for channel in REQUIRED_CHANNELS if channel.strip()
-    ]
-    keyboard_rows.append(
-        [types.InlineKeyboardButton(text="Я подписался", callback_data="check_subscription_callback")]
-    )
-    markup = types.InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+    """
+    Sends a message with inline buttons for required channel subscriptions.
+    If no valid channels are configured, this function does nothing.
+    """
+    channel_buttons = []
+    for channel in REQUIRED_CHANNELS:
+        channel_name = channel.strip()
+        url_username = channel_name.lstrip('@')
+        # Ensure we have a non-empty username for the URL to be valid
+        if url_username:
+            channel_buttons.append(
+                types.InlineKeyboardButton(
+                    text=f"Подписаться на {channel_name}",
+                    url=f"https://t.me/{url_username}"
+                )
+            )
 
+    # If there are no valid channels to subscribe to, do not send the message.
+    if not channel_buttons:
+        logger.info("Subscription request skipped: no valid REQUIRED_CHANNELS are set.")
+        return
+
+    # Build the keyboard with one button per row for channels
+    keyboard_rows = [[button] for button in channel_buttons]
+    # Add the "check" button on the final row
+    keyboard_rows.append([
+        types.InlineKeyboardButton(text="Я подписался", callback_data="check_subscription_callback")
+    ])
+
+    markup = types.InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
     await bot.send_message(
         chat_id,
         "Для использования бота необходимо подписаться на каналы:",
