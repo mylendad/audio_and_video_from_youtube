@@ -17,7 +17,7 @@ jobs:
     # - ENV_FILE: The content of your .env file.
     # - DEPLOY_PATH: The absolute path on the server where the project should be deployed (e.g., /home/user/app).
     # - DEPLOY_COMMANDS: The commands to run on the server after deployment (e.g., 'docker-compose up -d --build').
-#fee
+#feeыв
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
