@@ -11,7 +11,7 @@ services:
       - .env
     volumes:
       - ./www.youtube.com_cookies.txt:/app/www.youtube.com_cookies.txt
-      - /home/mylendad/.ssh/id_ed25519:/app/id_ed25519:ro
+      - ${SSH_KEY_HOST_PATH}:/app/id_ed25519:ro
     ports:
       - "8080:8080"
     dns:
