@@ -85,6 +85,10 @@ jobs:
           set -e
           cd ${{ secrets.DEPLOY_PATH }}
           
+          echo "--- DEBUG STEP ---"
+          echo "Value of secret STORAGE_KEY_SERVER_PATH is: [${{ secrets.STORAGE_KEY_SERVER_PATH }}]"
+          echo "--- END DEBUG STEP ---"
+          
           echo "Creating SSH key file for storage access..."
           SSH_KEY_PATH_ON_SERVER="${{ secrets.STORAGE_KEY_SERVER_PATH }}"
           
