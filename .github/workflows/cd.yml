@@ -43,6 +43,7 @@ jobs:
         STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}
         STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}
         SSH_KEY_HOST_PATH=${{ secrets.STORAGE_KEY_SERVER_PATH }}
+        STORAGE_PATH=${{ secrets.STORAGE_PATH }}
         EOF
         echo ".env file created locally."
 
