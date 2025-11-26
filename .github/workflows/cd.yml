@@ -80,21 +80,21 @@ jobs:
           
           echo "Creating .env file..."
           cat << EOF > .env
-          TOKEN=${{ secrets.TOKEN }}
-          ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}
-          ADMIN_USER_ID=${{ secrets.ADMIN_USER_ID }}
-          DB_DSN=${{ secrets.DB_DSN }}
+          TOKEN="${{ secrets.TOKEN }}"
+          ADMIN_CHAT_ID="${{ secrets.ADMIN_CHAT_ID }}"
+          ADMIN_USER_ID="${{ secrets.ADMIN_USER_ID }}"
+          DB_DSN="${{ secrets.DB_DSN }}"
           REQUIRED_CHANNELS='${{ secrets.REQUIRED_CHANNELS }}'
-          REDIS_HOST=${{ secrets.REDIS_HOST }}
-          REDIS_PORT=${{ secrets.REDIS_PORT }}
-          WEB_SERVER_PORT=${{ secrets.WEB_SERVER_PORT }}
-          STORAGE_HOST=${{ secrets.STORAGE_HOST }}
-          STORAGE_PORT=${{ secrets.STORAGE_PORT }}
-          STORAGE_USER=${{ secrets.STORAGE_USER }}
-          STORAGE_PASSWORD=${{ secrets.STORAGE_PASSWORD }}
-          STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}
-          STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}
-          SSH_KEY_HOST_PATH=${{ secrets.STORAGE_KEY_SERVER_PATH }}
+          REDIS_HOST="${{ secrets.REDIS_HOST }}"
+          REDIS_PORT="${{ secrets.REDIS_PORT }}"
+          WEB_SERVER_PORT="${{ secrets.WEB_SERVER_PORT }}"
+          STORAGE_HOST="${{ secrets.STORAGE_HOST }}"
+          STORAGE_PORT="${{ secrets.STORAGE_PORT }}"
+          STORAGE_USER="${{ secrets.STORAGE_USER }}"
+          STORAGE_PASSWORD="${{ secrets.STORAGE_PASSWORD }}"
+          STORAGE_PRIVATE_KEY_PATH="${{ secrets.STORAGE_PRIVATE_KEY_PATH }}"
+          STORAGE_PUBLIC_URL_PREFIX="${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}"
+          SSH_KEY_HOST_PATH="${{ secrets.STORAGE_KEY_SERVER_PATH }}"
           EOF
           echo ".env file created."
           
