@@ -6,12 +6,23 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production
+    environment: production 
+    # This job requires secrets to be set in your GitHub repository settings.
+    # Go to Settings > Secrets and variables > Actions to add them.─
+    #
+    # Required secrets:
+    # - SSH_HOST: The IP address or hostname of your server.
+    # - SSH_USER: The username for SSH login.
+    # - SSH_PORT: The port for SSH connection (default is 22)..github/workflows/cd.yml
+    # - ENV_FILE: The content of your .env file.
+    # - DEPLOY_PATH: The absolute path on the server where the project should be deployed (e.g., /home/user/app).
+    # - DEPLOY_COMMANDS: The commands to run on the server after deployment (e.g., 'docker-compose up -d --build').
+#feeff
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        ref: 'main'
+        ref: 'main' 
 
     - name: Create .env file locally
       run: |
@@ -77,7 +88,7 @@ jobs:
           echo "Creating SSH key file for storage access..."
           SSH_KEY_PATH_ON_SERVER="${{ secrets.STORAGE_KEY_SERVER_PATH }}"
           
-          # Ensure the target directory for the key exists
+          # Ensure the target directory for the key exists──
           SSH_KEY_DIR=$(dirname -- "$SSH_KEY_PATH_ON_SERVER")
           echo "Creating directory for SSH key: $SSH_KEY_DIR"
           mkdir -p -- "$SSH_KEY_DIR"
