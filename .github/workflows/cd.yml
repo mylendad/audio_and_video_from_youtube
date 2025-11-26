@@ -60,10 +60,10 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         script: |
           set -e
-          SSH_KEY_DIR=$(dirname "${{ secrets.STORAGE_KEY_SERVER_PATH }}")
+          SSH_KEY_DIR=$(dirname -- "${{ secrets.STORAGE_KEY_SERVER_PATH }}")
           echo "Creating SSH key directory if it doesn't exist: $SSH_KEY_DIR"
           mkdir -p "$SSH_KEY_DIR"
-          echo "Writing SSH private key to: ${{ secrets.STORAGE_SSH_PRIVATE_KEY }}" > "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
+          echo "${{ secrets.STORAGE_SSH_PRIVATE_KEY }}" > "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
           echo "Setting permissions for SSH private key."
           chmod 600 "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
           echo "SSH key file created and permissions set."
