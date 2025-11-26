@@ -73,24 +73,6 @@ jobs:
         script: |
           set -e
           cd ${{ secrets.DEPLOY_PATH }}
-          
-          echo "--- DEBUG STEP ---"
-          echo "Value of secret STORAGE_KEY_SERVER_PATH is: [${{ secrets.STORAGE_KEY_SERVER_PATH }}]"
-          echo "--- END DEBUG STEP ---"
-          
-          echo "Creating SSH key file for storage access..."
-          SSH_KEY_PATH_ON_SERVER="${{ secrets.STORAGE_KEY_SERVER_PATH }}"
-          
-          # Ensure the target directory for the key exists
-          SSH_KEY_DIR=$(dirname -- "$SSH_KEY_PATH_ON_SERVER")
-          echo "Creating directory for SSH key: $SSH_KEY_DIR"
-          mkdir -p -- "$SSH_KEY_DIR"
-          
-          # Create the key file
-          echo "Writing SSH private key to $SSH_KEY_PATH_ON_SERVER"
-          echo "${{ secrets.STORAGE_SSH_PRIVATE_KEY }}" > "$SSH_KEY_PATH_ON_SERVER"
-          chmod 600 -- "$SSH_KEY_PATH_ON_SERVER"
-          echo "SSH key file created and permissions set."
 
           echo "Ensuring www.youtube.com_cookies.txt exists..."
           rm -f www.youtube.com_cookies.txt
