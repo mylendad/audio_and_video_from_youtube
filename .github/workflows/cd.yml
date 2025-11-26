@@ -159,7 +159,7 @@ jobs:
           echo "--- Debugging SSH Key Path ---"
           cd ${{ secrets.DEPLOY_PATH }}
           # Load the .env file to get the SSH_KEY_HOST_PATH
-          export $(cat .env | xargs)
+          export $(grep -v '^#' .env | xargs -d '\n')
           echo "Value of SSH_KEY_HOST_PATH on server is: $SSH_KEY_HOST_PATH"
           echo "Checking what this path points to..."
           ls -ld "$SSH_KEY_HOST_PATH"
