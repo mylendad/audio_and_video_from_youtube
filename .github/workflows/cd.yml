@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production 
     # This job requires secrets to be set in your GitHub repository settings.
-    # Go to Settings > Secrets and variables > Actions to add them.
+    # Go to Settings > Secrets and variables > Actions to add them.─
     #
     # Required secrets:
     # - SSH_HOST: The IP address or hostname of your server.
@@ -24,6 +24,28 @@ jobs:
       with:
         ref: 'main' 
 
+    - name: Create .env file locally
+      run: |
+        echo "Creating .env file on the runner..."
+        cat << EOF > .env
+        TOKEN=${{ secrets.TOKEN }}
+        ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}
+        ADMIN_USER_ID=${{ secrets.ADMIN_USER_ID }}
+        DB_DSN=${{ secrets.DB_DSN }}
+        REQUIRED_CHANNELS='${{ secrets.REQUIRED_CHANNELS }}'
+        REDIS_HOST=${{ secrets.REDIS_HOST }}
+        REDIS_PORT=${{ secrets.REDIS_PORT }}
+        WEB_SERVER_PORT=${{ secrets.WEB_SERVER_PORT }}
+        STORAGE_HOST=${{ secrets.STORAGE_HOST }}
+        STORAGE_PORT=${{ secrets.STORAGE_PORT }}
+        STORAGE_USER=${{ secrets.STORAGE_USER }}
+        STORAGE_PASSWORD=${{ secrets.STORAGE_PASSWORD }}
+        STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}
+        STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}
+        SSH_KEY_HOST_PATH=${{ secrets.STORAGE_KEY_SERVER_PATH }}
+        EOF
+        echo ".env file created locally."
+
     - name: Clean up old version on server
       uses: appleboy/ssh-action@v1.0.3
       with:
@@ -34,10 +56,11 @@ jobs:
         script: |
           set -e
           echo "Cleaning up deployment directory: ${{ secrets.DEPLOY_PATH }}"
+          # Navigate to deploy path, creating it if it doesn't exist
+          mkdir -p ${{ secrets.DEPLOY_PATH }}
           cd ${{ secrets.DEPLOY_PATH }}
-          # Remove all visible files and directories
+          # Remove contents
           rm -rf *
-          # Remove all hidden files and directories (dotfiles)
           rm -rf .[^.]* ..?*
           echo "Cleanup complete."
 
@@ -51,7 +74,7 @@ jobs:
         source: "."
         target: ${{ secrets.DEPLOY_PATH }}
 
-    - name: Create SSH Key File
+    - name: Deploy on server
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.SSH_HOST }}
@@ -60,124 +83,26 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         script: |
           set -e
-          # echo "Raw STORAGE_KEY_SERVER_PATH:"
-          # printf "%q\n" "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
-          SSH_KEY_DIR=$(dirname -- "${{ secrets.STORAGE_KEY_SERVER_PATH }}")
-          # echo "Value of SSH_KEY_DIR:"
-          # printf "%q\n" "$SSH_KEY_DIR"
-          echo "Creating SSH key directory if it doesn't exist: $SSH_KEY_DIR"
+          cd ${{ secrets.DEPLOY_PATH }}
+          
+          echo "Creating SSH key file for storage access..."
+          SSH_KEY_PATH_ON_SERVER="${{ secrets.STORAGE_KEY_SERVER_PATH }}"
+          
+          # Ensure the target directory for the key exists──
+          SSH_KEY_DIR=$(dirname -- "$SSH_KEY_PATH_ON_SERVER")
+          echo "Creating directory for SSH key: $SSH_KEY_DIR"
           mkdir -p -- "$SSH_KEY_DIR"
-          echo "${{ secrets.STORAGE_SSH_PRIVATE_KEY }}" > "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
-          echo "Setting permissions for SSH private key."
-          chmod 600 -- "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
+          
+          # Create the key file
+          echo "Writing SSH private key to $SSH_KEY_PATH_ON_SERVER"
+          echo "${{ secrets.STORAGE_SSH_PRIVATE_KEY }}" > "$SSH_KEY_PATH_ON_SERVER"
+          chmod 600 -- "$SSH_KEY_PATH_ON_SERVER"
           echo "SSH key file created and permissions set."
 
-    - name: Create .env file on server
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_KEY }}
-        port: ${{ secrets.SSH_PORT }}
-        script: |
-          echo "--- Debugging .env creation ---"
-          echo "Changing to directory: ${{ secrets.DEPLOY_PATH }}"
-          cd ${{ secrets.DEPLOY_PATH }}
-          echo "Current directory is: $(pwd)"
-          echo "Listing files in current directory:"
-          ls -la
-          echo "--- Populating .env file ---"
-          echo "TOKEN=${{ secrets.TOKEN }}" > .env
-          echo "ADMIN_CHAT_ID=${{ secrets.ADMIN_CHAT_ID }}" >> .env
-          echo "ADMIN_USER_ID=${{ secrets.ADMIN_USER_ID }}" >> .env
-          echo "DB_DSN=${{ secrets.DB_DSN }}" >> .env
-          echo "REQUIRED_CHANNELS='${{ secrets.REQUIRED_CHANNELS }}'" >> .env
-          echo "REDIS_HOST=${{ secrets.REDIS_HOST }}" >> .env
-          echo "REDIS_PORT=${{ secrets.REDIS_PORT }}" >> .env
-          echo "WEB_SERVER_PORT=${{ secrets.WEB_SERVER_PORT }}" >> .env
-          echo "STORAGE_HOST=${{ secrets.STORAGE_HOST }}" >> .env
-          echo "STORAGE_PORT=${{ secrets.STORAGE_PORT }}" >> .env
-          echo "STORAGE_USER=${{ secrets.STORAGE_USER }}" >> .env
-          echo "STORAGE_PASSWORD=${{ secrets.STORAGE_PASSWORD }}" >> .env
-          echo "STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}" >> .env
-          echo "STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}" >> .env
-          echo "--- Verifying .env file content ---"
-          cat .env
-          echo "--- End of .env debug ---"
-
-    - name: Deploy on server
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_KEY }}
-        port: ${{ secrets.SSH_PORT }}
-        script: |
-          cd ${{ secrets.DEPLOY_PATH }}
-          echo "Current directory: $(pwd)"
-          
-          echo "Checking write permissions..."
-          touch .gemini-write-test.tmp && rm .gemini-write-test.tmp
-          echo "Write permissions are OK."
-          
-          echo "Creating .env file..."
-          cat << EOF > .env
-          TOKEN="${{ secrets.TOKEN }}"
-          ADMIN_CHAT_ID="${{ secrets.ADMIN_CHAT_ID }}"
-          ADMIN_USER_ID="${{ secrets.ADMIN_USER_ID }}"
-          DB_DSN="${{ secrets.DB_DSN }}"
-          REQUIRED_CHANNELS='${{ secrets.REQUIRED_CHANNELS }}'
-          REDIS_HOST="${{ secrets.REDIS_HOST }}"
-          REDIS_PORT="${{ secrets.REDIS_PORT }}"
-          WEB_SERVER_PORT="${{ secrets.WEB_SERVER_PORT }}"
-          STORAGE_HOST="${{ secrets.STORAGE_HOST }}"
-          STORAGE_PORT="${{ secrets.STORAGE_PORT }}"
-          STORAGE_USER="${{ secrets.STORAGE_USER }}"
-          STORAGE_PASSWORD="${{ secrets.STORAGE_PASSWORD }}"
-          STORAGE_PRIVATE_KEY_PATH="${{ secrets.STORAGE_PRIVATE_KEY_PATH }}"
-          STORAGE_PUBLIC_URL_PREFIX="${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}"
-          SSH_KEY_HOST_PATH="${{ secrets.STORAGE_KEY_SERVER_PATH }}"
-          EOF
-          echo ".env file created."
-          
-          echo "--- Verifying .env file ---"
-          echo "File details:"
-          ls -l .env
-          echo "Content of .env file:"
-          cat .env
-          echo "--- End of .env creation step ---"
-
-    # - name: Debug SSH Key Path
-    #   uses: appleboy/ssh-action@v1.0.3
-    #   with:
-    #     host: ${{ secrets.SSH_HOST }}
-    #     username: ${{ secrets.SSH_USER }}
-    #     key: ${{ secrets.SSH_KEY }}
-    #     port: ${{ secrets.SSH_PORT }}
-    #     script: |
-    #       set -e
-    #       echo "--- Debugging SSH Key Path ---"
-    #       cd ${{ secrets.DEPLOY_PATH }}
-    #       # Load the .env file to get the SSH_KEY_HOST_PATH
-    #       export $(grep -v '^#' .env | xargs -d '\n')
-    #       echo "Value of SSH_KEY_HOST_PATH on server is: $SSH_KEY_HOST_PATH"
-    #       echo "Checking what this path points to..."
-    #       ls -ld "$SSH_KEY_HOST_PATH"
-    #       echo "--- End of Debug ---"
-
-
-    - name: Deploy on server
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USER }}
-        key: ${{ secrets.SSH_KEY }}
-        port: ${{ secrets.SSH_PORT }}
-        script: |
-          cd ${{ secrets.DEPLOY_PATH }}
-          sudo rm -rf www.youtube.com_cookies.txt
+          echo "Ensuring www.youtube.com_cookies.txt exists..."
+          rm -f www.youtube.com_cookies.txt
           touch www.youtube.com_cookies.txt
-          set -o allexport
-          source .env
-          set +o allexport
+          
+          echo "Running deployment commands..."
           ${{ secrets.DEPLOY_COMMANDS }}
+          echo "Deployment finished."
