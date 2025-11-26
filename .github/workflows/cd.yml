@@ -40,6 +40,23 @@ jobs:
         source: "."
         target: ${{ secrets.DEPLOY_PATH }}
 
+    - name: Create SSH Key File
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        script: |
+          set -e
+          SSH_KEY_DIR=$(dirname "${{ secrets.STORAGE_KEY_SERVER_PATH }}")
+          echo "Creating SSH key directory if it doesn't exist: $SSH_KEY_DIR"
+          mkdir -p "$SSH_KEY_DIR"
+          echo "Writing SSH private key to: ${{ secrets.STORAGE_SSH_PRIVATE_KEY }}" > "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
+          echo "Setting permissions for SSH private key."
+          chmod 600 "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
+          echo "SSH key file created and permissions set."
+
     - name: Create .env file on server
       uses: appleboy/ssh-action@v1.0.3
       with:
@@ -73,7 +90,7 @@ jobs:
           STORAGE_PASSWORD=${{ secrets.STORAGE_PASSWORD }}
           STORAGE_PRIVATE_KEY_PATH=${{ secrets.STORAGE_PRIVATE_KEY_PATH }}
           STORAGE_PUBLIC_URL_PREFIX=${{ secrets.STORAGE_PUBLIC_URL_PREFIX }}
-          SSH_KEY_HOST_PATH=${{ secrets.SSH_KEY_HOST_PATH }}
+          SSH_KEY_HOST_PATH=${{ secrets.STORAGE_KEY_SERVER_PATH }}
           EOF
           echo ".env file created."
           
@@ -83,6 +100,24 @@ jobs:
           echo "Content of .env file:"
           cat .env
           echo "--- End of .env creation step ---"
+
+    - name: Debug SSH Key Path
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        script: |
+          set -e
+          echo "--- Debugging SSH Key Path ---"
+          cd ${{ secrets.DEPLOY_PATH }}
+          # Load the .env file to get the SSH_KEY_HOST_PATH
+          export $(cat .env | xargs)
+          echo "Value of SSH_KEY_HOST_PATH on server is: $SSH_KEY_HOST_PATH"
+          echo "Checking what this path points to..."
+          ls -ld "$SSH_KEY_HOST_PATH"
+          echo "--- End of Debug ---"
 
     - name: Deploy on server
       uses: appleboy/ssh-action@v1.0.3
