@@ -51,15 +51,6 @@ class StorageClient:
         elif self.password:
             conn_opts["password"] = self.password
 
-        logger.info(f"--- SFTP CONNECTION DEBUG ---")
-        logger.info(f"Host: {conn_opts.get('host')}")
-        logger.info(f"Port: {conn_opts.get('port')}")
-        logger.info(f"Username: {conn_opts.get('username')}")
-        logger.info(f"Password provided: {'yes' if conn_opts.get('password') else 'no'}")
-        logger.info(f"Client keys path: {conn_opts.get('client_keys')}")
-        logger.info(f"Remote file path: {remote_file_path}")
-        logger.info(f"--- END SFTP CONNECTION DEBUG ---")
-
         logger.info(f"Connecting to storage at {self.host}:{self.port}...")
         try:
             async with asyncssh.connect(**conn_opts) as conn:
