@@ -177,5 +177,7 @@ jobs:
           cd ${{ secrets.DEPLOY_PATH }}
           sudo rm -rf www.youtube.com_cookies.txt
           touch www.youtube.com_cookies.txt
-          export $(grep -v '^#' .env | xargs -d '\n')
+          set -o allexport
+          source .env
+          set +o allexport
           ${{ secrets.DEPLOY_COMMANDS }}
