@@ -49,12 +49,16 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         script: |
           set -e
+          echo "Raw STORAGE_KEY_SERVER_PATH:"
+          printf "%q\n" "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
           SSH_KEY_DIR=$(dirname -- "${{ secrets.STORAGE_KEY_SERVER_PATH }}")
+          echo "Value of SSH_KEY_DIR:"
+          printf "%q\n" "$SSH_KEY_DIR"
           echo "Creating SSH key directory if it doesn't exist: $SSH_KEY_DIR"
-          mkdir -p "$SSH_KEY_DIR"
+          mkdir -p -- "$SSH_KEY_DIR"
           echo "${{ secrets.STORAGE_SSH_PRIVATE_KEY }}" > "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
           echo "Setting permissions for SSH private key."
-          chmod 600 "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
+          chmod 600 -- "${{ secrets.STORAGE_KEY_SERVER_PATH }}"
           echo "SSH key file created and permissions set."
 
     - name: Create .env file on server
