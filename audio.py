@@ -361,7 +361,6 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
     base_filename = f"temp_{user_id}_{timestamp}"
     output_template = f"{base_filename}.%(ext)s"
     final_path = None
-    keep_file = False
 
     last_update_time = 0
     loop = asyncio.get_running_loop()
@@ -506,13 +505,25 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
                     # Ошибку не перевыбрасываем, чтобы выполнился блок finally для очистки,
                     # но пользователь уже уведомлен.
             else:
-                logger.info(f"Storage upload отключен. Файл > 50 МБ сохранен локально: {final_path}")
-                await status_message.edit_text(
-                    f"Файл слишком большой для отправки в Telegram.\n\n"
-                    f"Скачан полностью и сохранен локально.\n"
-                    f"Размер: {format_size(file_size)}"
-                )
-                keep_file = True
+                logger.info("Файл > 50 МБ. Публикация через собственный веб-сервер.")
+                await status_message.edit_text("Загрузка большого файла на сервер...")
+
+                try:
+                    content_type = mimetypes.guess_type(final_path)[0] or 'application/octet-stream'
+                    async with public_file_server(final_path, content_type=content_type) as public_url:
+                        await status_message.edit_text("Отправка ссылки на файл...")
+                        await message.answer(
+                            f"Файл слишком большой для автоматической отправки.\n\n"
+                            f"Вы можете скачать его по прямой ссылке:\n"
+                            f"{public_url}"
+                        )
+                    await status_message.delete()
+
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке большого файла: {e}", exc_info=True)
+                    await message.answer(f"Не удалось обработать большой файл. Ошибка: {e}")
+                    # Ошибку не перевыбрасываем, чтобы выполнился блок finally для очистки,
+                    # но пользователь уже уведомлен.
 
 
     except TelegramForbiddenError:
@@ -544,7 +555,7 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
     finally:
         
         release_user_lock(user_id)
-        if final_path and os.path.exists(final_path) and not keep_file:
+        if final_path and os.path.exists(final_path):
             try:
                 os.remove(final_path)
                 logger.info(f"Удален временный файл: {final_path}")
