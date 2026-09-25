@@ -32,7 +32,7 @@ from generate_cookies import export_youtube_cookies_to_txt
 from redis_lock import acquire_user_lock, release_user_lock
 from clients import AsyncUserActioner, AsyncPostgresClient, storage_client
 
-from config import TOKEN, ADMIN_CHAT_ID, ADMIN_USER_ID, DB_DSN, REQUIRED_CHANNELS, COOKIE_FILE
+from config import TOKEN, ADMIN_CHAT_ID, ADMIN_USER_ID, DB_DSN, REQUIRED_CHANNELS, COOKIE_FILE, STORAGE_UPLOAD_ENABLED
 from constants import FORMATS
 
 
@@ -361,6 +361,7 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
     base_filename = f"temp_{user_id}_{timestamp}"
     output_template = f"{base_filename}.%(ext)s"
     final_path = None
+    keep_file = False
 
     last_update_time = 0
     loop = asyncio.get_running_loop()
@@ -482,36 +483,36 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
             else:
                 await message.answer_document(fs_file)
         else:
-            logger.info("Файл > 50 МБ. Загрузка на удаленное хранилище для получения ссылки.")
-            await status_message.edit_text("Загрузка большого файла на сервер...")
+            if STORAGE_UPLOAD_ENABLED:
+                logger.info("Файл > 50 МБ. Загрузка на удаленное хранилище для получения ссылки.")
+                await status_message.edit_text("Загрузка большого файла на сервер...")
 
-            try:
-                public_url = await storage_client.upload_file(final_path)
-                logger.info(f"Файл загружен, получен URL: {public_url}")
+                try:
+                    public_url = await storage_client.upload_file(final_path)
+                    logger.info(f"Файл загружен, получен URL: {public_url}")
 
-                await status_message.edit_text("Отправка ссылки на файл...")
-                await message.answer(
-                    f"Файл слишком большой для автоматической отправки.\n\n"
-                    f"Вы можете скачать его по прямой ссылке:\n"
-                    f"{public_url}"
+                    await status_message.edit_text("Отправка ссылки на файл...")
+                    await message.answer(
+                        f"Файл слишком большой для автоматической отправки.\n\n"
+                        f"Вы можете скачать его по прямой ссылке:\n"
+                        f"{public_url}"
+                    )
+
+                    await status_message.delete()
+
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке большого файла: {e}", exc_info=True)
+                    await message.answer(f"Не удалось обработать большой файл. Ошибка: {e}")
+                    # Ошибку не перевыбрасываем, чтобы выполнился блок finally для очистки,
+                    # но пользователь уже уведомлен.
+            else:
+                logger.info(f"Storage upload отключен. Файл > 50 МБ сохранен локально: {final_path}")
+                await status_message.edit_text(
+                    f"Файл слишком большой для отправки в Telegram.\n\n"
+                    f"Скачан полностью и сохранен локально.\n"
+                    f"Размер: {format_size(file_size)}"
                 )
-                
-                
-                # await status_message.edit_text("Отправка файла в Telegram...")
-                # if format_config['send_method'] == 'send_audio':
-                #     await message.answer_audio(public_url, request_timeout=1800)
-                # elif format_config['send_method'] == 'send_video':
-                #     await message.answer_video(public_url, request_timeout=1800)
-                # else:
-                #     await message.answer_document(public_url, request_timeout=1800)
-                
-                await status_message.delete()
-
-            except Exception as e:
-                logger.error(f"Ошибка при обработке большого файла: {e}", exc_info=True)
-                await message.answer(f"Не удалось обработать большой файл. Ошибка: {e}")
-                # Ошибку не перевыбрасываем, чтобы выполнился блок finally для очистки,
-                # но пользователь уже уведомлен.
+                keep_file = True
 
 
     except TelegramForbiddenError:
@@ -543,7 +544,7 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
     finally:
         
         release_user_lock(user_id)
-        if final_path and os.path.exists(final_path):
+        if final_path and os.path.exists(final_path) and not keep_file:
             try:
                 os.remove(final_path)
                 logger.info(f"Удален временный файл: {final_path}")

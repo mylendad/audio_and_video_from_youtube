@@ -21,5 +21,6 @@ STORAGE_PASSWORD = env.str("STORAGE_PASSWORD", default=None)
 STORAGE_PRIVATE_KEY_PATH = env.str("STORAGE_PRIVATE_KEY_PATH", default=None)
 STORAGE_PATH = env.str("STORAGE_PATH", default="/")
 STORAGE_PUBLIC_URL_PREFIX = env.str("STORAGE_PUBLIC_URL_PREFIX", default=None)
+STORAGE_UPLOAD_ENABLED = env.bool("STORAGE_UPLOAD_ENABLED", default=True)
 
 COOKIE_FILE = "www.youtube.com_cookies.txt"
