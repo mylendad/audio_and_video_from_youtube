@@ -135,6 +135,24 @@ def is_youtube_url(url: str) -> bool:
     return True
 
 DOWNLOAD_TIMEOUT_SECONDS = 600 # 10 минут на скачивание/извлечение информации
+DOWNLOAD_ATTEMPTS = 4 # YouTube выдаёт "мёртвые" ссылки (403) - лечится перевыдачей
+
+RETRIABLE_DOWNLOAD_ERRORS = (
+    'HTTP Error 403',
+    'HTTP Error 429',
+    'HTTP Error 5',
+    'Connection reset',
+    'Connection aborted',
+    'timed out',
+    'IncompleteRead',
+    'Remote end closed',
+)
+
+
+def is_retriable_download_error(e: Exception) -> bool:
+    """Мёртвая ссылка от YouTube лечится только новой ссылкой - повторяем загрузку."""
+    message = str(e)
+    return any(marker in message for marker in RETRIABLE_DOWNLOAD_ERRORS)
 
 def cookie_file_option() -> dict:
     """
@@ -198,8 +216,13 @@ async def estimate_all_sizes(url: str) -> dict[str, float]:
     def is_video(f: dict) -> bool:
         return f.get('video_ext') not in (None, 'none') or f.get('vcodec') not in (None, 'none')
 
-    def video_candidates() -> list[dict]:
-        return [f for f in formats if is_video(f) and not is_audio(f)]
+    def video_candidates(prefer_h264: bool = False) -> list[dict]:
+        cands = [f for f in formats if is_video(f) and not is_audio(f)]
+        if prefer_h264:
+            h264_cands = [f for f in cands if (f.get('vcodec') or '').startswith(('avc1', 'h264'))]
+            if h264_cands:
+                return h264_cands
+        return cands
 
     def best_size(cands: list[dict]) -> float:
         return max((format_estimated_size(f) for f in cands), default=0.0)
@@ -213,7 +236,7 @@ async def estimate_all_sizes(url: str) -> dict[str, float]:
         if 'bestvideo' in selector:
             height_match = re.search(r'height<=(\d+)', selector)
             height = int(height_match.group(1)) if height_match else 720
-            vids = [f for f in video_candidates() if (f.get('height') or 0) <= height]
+            vids = [f for f in video_candidates('vcodec^=avc1' in selector) if (f.get('height') or 0) <= height]
             video_size = best_size(vids)
             fallback_size = best_size([f for f in formats if is_video(f)]) if not vids else 0.0
             sizes[key] = video_size + (audio_size if video_size else fallback_size) # type: ignore[index]
@@ -423,15 +446,37 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         ydl_opts['postprocessors'] = format_config['postprocessors'] # type: ignore[index]
         ydl_opts['keepvideo'] = True  
 
+    if format_config.get('send_method') == 'send_video': # type: ignore[union-attr]
+        # Склеенные потоки всегда собираем в mp4: mp4/h264 Telegram играет
+        # штатным плеером, webm/AV1 приходится открывать сторонним.
+        ydl_opts['merge_output_format'] = 'mp4'
+
     info: dict[str, Any] = {} # Объявляем info здесь
     try:
         logger.info(f"Начало обработки: {url}")
         logger.info(f"Формат: {format_key}")
         logger.info(f"Параметры: {format_config}")
-        
-        async with asyncio.timeout(DOWNLOAD_TIMEOUT_SECONDS): # Устанавливаем таймаут
-            with YoutubeDL(ydl_opts) as ydl: # type: ignore
-                info = cast(dict[str, Any], await asyncio.to_thread(ydl.extract_info, url))
+
+        # YouTube примерно в трети случаев выдаёт ссылку, которая отдаёт 403
+        # уже на втором чанке (при этом первая десятка мегабайт проходит).
+        # Помогает только новый extract_info: ссылка перевыдаётся, а уже
+        # скачанное докачивается из .part (continuedl).
+        for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+            try:
+                async with asyncio.timeout(DOWNLOAD_TIMEOUT_SECONDS):
+                    with YoutubeDL(ydl_opts) as ydl: # type: ignore
+                        info = cast(dict[str, Any], await asyncio.to_thread(ydl.extract_info, url))
+                break
+            except Exception as e:
+                if attempt == DOWNLOAD_ATTEMPTS or not is_retriable_download_error(e):
+                    raise
+                delay = 10 * attempt
+                logger.warning(f"Ошибка загрузки (попытка {attempt}/{DOWNLOAD_ATTEMPTS}), "
+                               f"повтор через {delay} c: {e}")
+                await edit_status_message(
+                    f" YouTube оборвал соединение, повторяю ({attempt}/{DOWNLOAD_ATTEMPTS - 1})..."
+                )
+                await asyncio.sleep(delay)
 
         # url = None # Удаляем эту строку
         logger.info(f"Информация о видео: {info.get('title')}")
@@ -545,6 +590,9 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         
         if "File not found" in str(e):
             error_message += "\n\n Файл не был создан после обработки. Возможно, проблема с конвертацией."
+        elif "HTTP Error 403" in str(e):
+            error_message += ("\n\n YouTube разрывает соединение с этого сервера и выдаёт битые ссылки. "
+                              "Попробуйте ещё раз или позже - обычно помогает повторная попытка.")
         elif "Unable to download webpage" in str(e):
             error_message += "\n\n Ошибка доступа к видео. Проверьте ссылку или попробуйте позже."
         elif "Private video" in str(e):
@@ -558,8 +606,10 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
             await message.answer(error_message)
         except TelegramForbiddenError:
             logger.warning(f"Bot is blocked by user {user_id}. Could not send final error message.")
-        
-        await state.clear()
+
+        # Ссылку сохраняем: после ошибки пользователь может сразу повторить
+        # загрузку в другом качестве, не отправляя ссылку заново.
+        await state.set_state(None)
 
     finally:
         

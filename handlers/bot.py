@@ -194,7 +194,9 @@ async def handle_format_command(message: types.Message, state: FSMContext) -> No
 
         await process_download(message, format_key, state)
 
-        await state.clear()
+        # Ссылку не стираем: после загрузки можно сразу жать другое качество.
+        # Сбрасываем только состояние, данные (last_url) остаются в FSM.
+        await state.set_state(None)
     except TelegramForbiddenError:
         if from_user is not None:
             logger.warning(f"Bot is blocked by user {from_user.id}, download process aborted.")
