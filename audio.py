@@ -13,6 +13,8 @@ from ipaddress import ip_address, IPv4Address, IPv6Address, AddressValueError
 # import aiohttp
 
 from aiogram import Bot, F, types
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -32,18 +34,25 @@ from generate_cookies import export_youtube_cookies_to_txt
 from redis_lock import acquire_user_lock, release_user_lock
 from clients import AsyncUserActioner, AsyncPostgresClient, storage_client
 
-from config import TOKEN, ADMIN_CHAT_ID, ADMIN_USER_ID, DB_DSN, REQUIRED_CHANNELS, COOKIE_FILE
+from config import TOKEN, ADMIN_CHAT_ID, ADMIN_USER_ID, DB_DSN, REQUIRED_CHANNELS, COOKIE_FILE, STORAGE_UPLOAD_ENABLED, BOT_API_URL
 from constants import FORMATS
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Лимит размера файла для прямой отправки (49 МБ для надежности)
+# Лимит размера файла для прямой отправки (49 МБ для надежности).
+# С локальным Telegram Bot API сервером (--local) лимит вырастает до ~2 ГБ.
 MAX_FILE_SIZE = 49 * 1024 * 1024
+DIRECT_SEND_LIMIT = int(1900 * 1024 * 1024) if BOT_API_URL else MAX_FILE_SIZE
 
 
-bot = Bot(token=TOKEN)
+if BOT_API_URL:
+    session = AiohttpSession(api=TelegramAPIServer.from_base(BOT_API_URL, is_local=True))
+    bot = Bot(token=TOKEN, session=session)
+    logger.info(f"Бот подключен к локальному Telegram Bot API: {BOT_API_URL}")
+else:
+    bot = Bot(token=TOKEN)
 
 db = AsyncPostgresClient(dsn=DB_DSN)
 user_actioner = AsyncUserActioner(db)
@@ -126,43 +135,114 @@ def is_youtube_url(url: str) -> bool:
     return True
 
 DOWNLOAD_TIMEOUT_SECONDS = 600 # 10 минут на скачивание/извлечение информации
+DOWNLOAD_ATTEMPTS = 4 # YouTube выдаёт "мёртвые" ссылки (403) - лечится перевыдачей
 
-async def estimate_video_size(url: str, format_config: dict) -> float:
+RETRIABLE_DOWNLOAD_ERRORS = (
+    'HTTP Error 403',
+    'HTTP Error 429',
+    'HTTP Error 5',
+    'Connection reset',
+    'Connection aborted',
+    'timed out',
+    'IncompleteRead',
+    'Remote end closed',
+)
+
+
+def is_retriable_download_error(e: Exception) -> bool:
+    """Мёртвая ссылка от YouTube лечится только новой ссылкой - повторяем загрузку."""
+    message = str(e)
+    return any(marker in message for marker in RETRIABLE_DOWNLOAD_ERRORS)
+
+def cookie_file_option() -> dict:
+    """
+    Возвращает опции yt-dlp для cookie-файла только если он существует и доступен
+    для записи (yt-dlp записывает в него обновлённые куки и жёстко падает, если
+    файл не доступен для записи). Иначе работает анонимно.
+    """
+    if os.path.exists(COOKIE_FILE) and os.access(COOKIE_FILE, os.W_OK):
+        return {'cookiefile': COOKIE_FILE}
+    logger.warning(f"Cookie-файл {COOKIE_FILE} отсутствует или не доступен для записи, работаю без куки.")
+    return {}
+
+def format_estimated_size(f: dict) -> float:
+    """Оценка размера формата: filesize, иначе tbr * duration / 8."""
+    filesize = f.get('filesize') or f.get('filesize_approx')
+    if filesize:
+        return float(filesize)
+    tbr = f.get('tbr') or 0.0
+    duration = f.get('duration') or 1.0
+    return (tbr * 1000 * duration) / 8
+
+
+async def estimate_all_sizes(url: str) -> dict[str, float]:
+    """
+    Размеры ВСЕХ форматов за ОДИН extract_info (нужен размер:
+    без него каждый из 7 форматов гонял отдельный extract и триггерил
+    HTTP 403 / rate-limit).
+    """
     ydl_opts = {
         'quiet': True,
         'simulate': True,
-        'format': format_config['format'], # type: ignore[index]
-        'cookiefile': COOKIE_FILE,
+        'format': 'bestvideo+bestaudio/best',
+        **cookie_file_option(),
+        'extractor_args': {'youtube': ['player_client=web,android_vr']},
+        'retries': 2,
+        'fragment_retries': 2,
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'restrictfilenames': True, # Ограничение имен файлов
     }
-    
-    if 'postprocessors' in format_config:
-        ydl_opts['postprocessors'] = format_config['postprocessors']
 
     info: dict[str, Any] = {}
     try:
-        async with asyncio.timeout(DOWNLOAD_TIMEOUT_SECONDS): # Устанавливаем таймаут
+        async with asyncio.timeout(DOWNLOAD_TIMEOUT_SECONDS):
             with YoutubeDL(ydl_opts) as ydl: # type: ignore
-                info = await asyncio.to_thread(ydl.extract_info, url, download=False) # type: ignore
-            
-            if 'requested_downloads' in info and info['requested_downloads']:
-                filesize = info['requested_downloads'][0].get('filesize')
-                if filesize:
-                    return filesize
-                    
-            tbr: float = info.get('tbr') or 0.0 # type: ignore[assignment]
-            duration: float = info.get('duration') or 1.0 # type: ignore[assignment]
-            
-            estimated_size = (tbr * 1000 * duration) / 8
-            return estimated_size
-            
+                info = cast(dict[str, Any], await asyncio.to_thread(ydl.extract_info, url, download=False))
     except asyncio.TimeoutError:
-        logger.error(f"Таймаут операции оценки размера для URL: {url}")
-        return 0
+        logger.error(f"Таймаут оценки размера для URL: {url}")
+        return {}
     except Exception as e:
         logger.error(f"Ошибка оценки размера: {e}")
-        return 0
+        return {}
+
+    formats = info.get('formats') or []
+    duration = info.get('duration') or 1.0
+    for f in formats:
+        f.setdefault('duration', duration)
+
+    def is_audio(f: dict) -> bool:
+        return f.get('audio_ext') not in (None, 'none') or f.get('acodec') not in (None, 'none')
+
+    def is_video(f: dict) -> bool:
+        return f.get('video_ext') not in (None, 'none') or f.get('vcodec') not in (None, 'none')
+
+    def video_candidates(prefer_h264: bool = False) -> list[dict]:
+        cands = [f for f in formats if is_video(f) and not is_audio(f)]
+        if prefer_h264:
+            h264_cands = [f for f in cands if (f.get('vcodec') or '').startswith(('avc1', 'h264'))]
+            if h264_cands:
+                return h264_cands
+        return cands
+
+    def best_size(cands: list[dict]) -> float:
+        return max((format_estimated_size(f) for f in cands), default=0.0)
+
+    audio_cands = [f for f in formats if is_audio(f) and not is_video(f)]
+    audio_size = best_size(audio_cands)
+
+    sizes: dict[str, float] = {}
+    for key, cfg in FORMATS.items():
+        selector = cfg['format'] # type: ignore[index]
+        if 'bestvideo' in selector:
+            height_match = re.search(r'height<=(\d+)', selector)
+            height = int(height_match.group(1)) if height_match else 720
+            vids = [f for f in video_candidates('vcodec^=avc1' in selector) if (f.get('height') or 0) <= height]
+            video_size = best_size(vids)
+            fallback_size = best_size([f for f in formats if is_video(f)]) if not vids else 0.0
+            sizes[key] = video_size + (audio_size if video_size else fallback_size) # type: ignore[index]
+        else:
+            sizes[key] = audio_size  # type: ignore[index]
+    return sizes
 
 async def send_subscription_request(chat_id: int):
     """
@@ -353,7 +433,10 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         'continuedl': True,
         'noprogress': True, 
         'verbose': False,
-        'cookiefile': COOKIE_FILE,
+        **cookie_file_option(),
+        'extractor_args': {'youtube': ['player_client=web,android_vr']},
+        'retries': 5,
+        'fragment_retries': 5,
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'progress_hooks': [progress_hook],
         'restrictfilenames': True, # Ограничение имен файлов
@@ -363,57 +446,79 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         ydl_opts['postprocessors'] = format_config['postprocessors'] # type: ignore[index]
         ydl_opts['keepvideo'] = True  
 
+    if format_config.get('send_method') == 'send_video': # type: ignore[union-attr]
+        # Склеенные потоки всегда собираем в mp4: mp4/h264 Telegram играет
+        # штатным плеером, webm/AV1 приходится открывать сторонним.
+        ydl_opts['merge_output_format'] = 'mp4'
+
     info: dict[str, Any] = {} # Объявляем info здесь
     try:
         logger.info(f"Начало обработки: {url}")
         logger.info(f"Формат: {format_key}")
         logger.info(f"Параметры: {format_config}")
-        
-        async with asyncio.timeout(DOWNLOAD_TIMEOUT_SECONDS): # Устанавливаем таймаут
-            with YoutubeDL(ydl_opts) as ydl: # type: ignore
-                info = cast(dict[str, Any], await asyncio.to_thread(ydl.extract_info, url))
+
+        # YouTube примерно в трети случаев выдаёт ссылку, которая отдаёт 403
+        # уже на втором чанке (при этом первая десятка мегабайт проходит).
+        # Помогает только новый extract_info: ссылка перевыдаётся, а уже
+        # скачанное докачивается из .part (continuedl).
+        for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+            try:
+                async with asyncio.timeout(DOWNLOAD_TIMEOUT_SECONDS):
+                    with YoutubeDL(ydl_opts) as ydl: # type: ignore
+                        info = cast(dict[str, Any], await asyncio.to_thread(ydl.extract_info, url))
+                break
+            except Exception as e:
+                if attempt == DOWNLOAD_ATTEMPTS or not is_retriable_download_error(e):
+                    raise
+                delay = 10 * attempt
+                logger.warning(f"Ошибка загрузки (попытка {attempt}/{DOWNLOAD_ATTEMPTS}), "
+                               f"повтор через {delay} c: {e}")
+                await edit_status_message(
+                    f" YouTube оборвал соединение, повторяю ({attempt}/{DOWNLOAD_ATTEMPTS - 1})..."
+                )
+                await asyncio.sleep(delay)
 
         # url = None # Удаляем эту строку
         logger.info(f"Информация о видео: {info.get('title')}")
-            logger.info(f"Расширение: {info.get('ext')}")
-            if 'requested_downloads' in info and info['requested_downloads']: # type: ignore[index]
-                logger.info(f"Запрошенные загрузки: {info['requested_downloads'][0]}")
+        logger.info(f"Расширение: {info.get('ext')}")
+        if 'requested_downloads' in info and info['requested_downloads']: # type: ignore[index]
+            logger.info(f"Запрошенные загрузки: {info['requested_downloads'][0]}")
 
-            if 'postprocessors' in format_config: # type: ignore[operator]
-                ext = format_config['extension'] # type: ignore[index]
-                final_path = f"{base_filename}.{ext}"
-                
-                for i in range(15):
-                    if os.path.exists(final_path):
-                        break
-                    logger.info(f"Ожидание файла ({i+1}/15): {final_path}")
-                    await asyncio.sleep(1)
-                else:
-                    raise FileNotFoundError(f"Конвертированный файл не найден: {final_path}")
+        if 'postprocessors' in format_config: # type: ignore[operator]
+            ext = format_config['extension'] # type: ignore[index]
+            final_path = f"{base_filename}.{ext}"
+            
+            for i in range(15):
+                if os.path.exists(final_path):
+                    break
+                logger.info(f"Ожидание файла ({i+1}/15): {final_path}")
+                await asyncio.sleep(1)
             else:
-                ext = info.get('ext', 'mp4')
-                final_path = f"{base_filename}.{ext}"
+                raise FileNotFoundError(f"Конвертированный файл не найден: {final_path}")
+        else:
+            ext = info.get('ext', 'mp4')
+            final_path = f"{base_filename}.{ext}"
+            
+            if not os.path.exists(final_path):
+                candidates = glob.glob(f"{base_filename}*")
+                logger.info(f"Файл не найден, кандидаты: {candidates}")
                 
-                if not os.path.exists(final_path):
-                    candidates = glob.glob(f"{base_filename}*")
-                    logger.info(f"Файл не найден, кандидаты: {candidates}")
-                    
-                    filtered_candidates = [
-                        f for f in candidates 
-                        if not re.search(r'\.f\d+\.', f)
-                        and not f.endswith('.part')        
-                        and not f.endswith('.ytdl')                             ]
-                    
-                    logger.info(f"Отфильтрованные кандидаты: {filtered_candidates}")
-                    
-                    if filtered_candidates:
-                        filtered_candidates.sort(key=os.path.getmtime, reverse=True)
-                        final_path = filtered_candidates[0]
-                        logger.info(f"Выбран файл по дате изменения: {final_path}")
-                    
-                    if not os.path.exists(final_path) and candidates:
-                        final_path = candidates[0]
-                        logger.info(f"Выбран первый кандидат: {final_path}")
+                filtered_candidates = [
+                    f for f in candidates 
+                    if not re.search(r'\.f\d+\.', f)
+                    and not f.endswith('.part')        
+                    and not f.endswith('.ytdl')                             ]
+                
+                logger.info(f"Отфильтрованные кандидаты: {filtered_candidates}")
+                
+                if filtered_candidates:
+                    filtered_candidates.sort(key=os.path.getmtime, reverse=True)
+                    final_path = filtered_candidates[0]
+                    logger.info(f"Выбран файл по дате изменения: {final_path}")
+                
+                if not os.path.exists(final_path) and candidates:
+                    final_path = candidates[0]
+                    logger.info(f"Выбран первый кандидат: {final_path}")
 
         if not os.path.exists(final_path):
             raise FileNotFoundError(f"Файл не найден после скачивания: {final_path}")
@@ -421,8 +526,8 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         file_size = os.path.getsize(final_path)
         logger.info(f"Финальный путь: {final_path}, размер: {file_size} байт")
 
-        if file_size <= MAX_FILE_SIZE:
-            logger.info("Файл меньше 50 МБ, отправка напрямую.")
+        if file_size <= DIRECT_SEND_LIMIT:
+            logger.info("Файл в пределах лимита прямой отправки, отправка напрямую.")
             fs_file = types.FSInputFile(final_path)
             if format_config['send_method'] == 'send_audio': # type: ignore[index]
                 await message.answer_audio(fs_file)
@@ -431,36 +536,48 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
             else:
                 await message.answer_document(fs_file)
         else:
-            logger.info("Файл > 50 МБ. Загрузка на удаленное хранилище для получения ссылки.")
-            await status_message.edit_text("Загрузка большого файла на сервер...")
+            if STORAGE_UPLOAD_ENABLED:
+                logger.info("Файл > 50 МБ. Загрузка на удаленное хранилище для получения ссылки.")
+                await status_message.edit_text("Загрузка большого файла на сервер...")
 
-            try:
-                public_url = await storage_client.upload_file(final_path)
-                logger.info(f"Файл загружен, получен URL: {public_url}")
+                try:
+                    public_url = await storage_client.upload_file(final_path)
+                    logger.info(f"Файл загружен, получен URL: {public_url}")
 
-                await status_message.edit_text("Отправка ссылки на файл...")
-                await message.answer(
-                    f"Файл слишком большой для автоматической отправки.\n\n"
-                    f"Вы можете скачать его по прямой ссылке:\n"
-                    f"{public_url}"
-                )
-                
-                
-                # await status_message.edit_text("Отправка файла в Telegram...")
-                # if format_config['send_method'] == 'send_audio':
-                #     await message.answer_audio(public_url, request_timeout=1800)
-                # elif format_config['send_method'] == 'send_video':
-                #     await message.answer_video(public_url, request_timeout=1800)
-                # else:
-                #     await message.answer_document(public_url, request_timeout=1800)
-                
-                await status_message.delete()
+                    await status_message.edit_text("Отправка ссылки на файл...")
+                    await message.answer(
+                        f"Файл слишком большой для автоматической отправки.\n\n"
+                        f"Вы можете скачать его по прямой ссылке:\n"
+                        f"{public_url}"
+                    )
 
-            except Exception as e:
-                logger.error(f"Ошибка при обработке большого файла: {e}", exc_info=True)
-                await message.answer(f"Не удалось обработать большой файл. Ошибка: {e}")
-                # Ошибку не перевыбрасываем, чтобы выполнился блок finally для очистки,
-                # но пользователь уже уведомлен.
+                    await status_message.delete()
+
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке большого файла: {e}", exc_info=True)
+                    await message.answer(f"Не удалось обработать большой файл. Ошибка: {e}")
+                    # Ошибку не перевыбрасываем, чтобы выполнился блок finally для очистки,
+                    # но пользователь уже уведомлен.
+            else:
+                logger.info("Файл > 50 МБ. Публикация через собственный веб-сервер.")
+                await status_message.edit_text("Загрузка большого файла на сервер...")
+
+                try:
+                    content_type = mimetypes.guess_type(final_path)[0] or 'application/octet-stream'
+                    async with public_file_server(final_path, content_type=content_type) as public_url:
+                        await status_message.edit_text("Отправка ссылки на файл...")
+                        await message.answer(
+                            f"Файл слишком большой для автоматической отправки.\n\n"
+                            f"Вы можете скачать его по прямой ссылке:\n"
+                            f"{public_url}"
+                        )
+                    await status_message.delete()
+
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке большого файла: {e}", exc_info=True)
+                    await message.answer(f"Не удалось обработать большой файл. Ошибка: {e}")
+                    # Ошибку не перевыбрасываем, чтобы выполнился блок finally для очистки,
+                    # но пользователь уже уведомлен.
 
 
     except TelegramForbiddenError:
@@ -473,6 +590,9 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         
         if "File not found" in str(e):
             error_message += "\n\n Файл не был создан после обработки. Возможно, проблема с конвертацией."
+        elif "HTTP Error 403" in str(e):
+            error_message += ("\n\n YouTube разрывает соединение с этого сервера и выдаёт битые ссылки. "
+                              "Попробуйте ещё раз или позже - обычно помогает повторная попытка.")
         elif "Unable to download webpage" in str(e):
             error_message += "\n\n Ошибка доступа к видео. Проверьте ссылку или попробуйте позже."
         elif "Private video" in str(e):
@@ -486,8 +606,10 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
             await message.answer(error_message)
         except TelegramForbiddenError:
             logger.warning(f"Bot is blocked by user {user_id}. Could not send final error message.")
-        
-        await state.clear()
+
+        # Ссылку сохраняем: после ошибки пользователь может сразу повторить
+        # загрузку в другом качестве, не отправляя ссылку заново.
+        await state.set_state(None)
 
     finally:
         

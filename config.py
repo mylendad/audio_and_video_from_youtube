@@ -21,5 +21,10 @@ STORAGE_PASSWORD = env.str("STORAGE_PASSWORD", default=None)
 STORAGE_PRIVATE_KEY_PATH = env.str("STORAGE_PRIVATE_KEY_PATH", default=None)
 STORAGE_PATH = env.str("STORAGE_PATH", default="/")
 STORAGE_PUBLIC_URL_PREFIX = env.str("STORAGE_PUBLIC_URL_PREFIX", default=None)
+STORAGE_UPLOAD_ENABLED = env.bool("STORAGE_UPLOAD_ENABLED", default=True)
+
+# Локальный Telegram Bot API сервер (запуск с --local поднимает лимит до 2 ГБ).
+# Пример: BOT_API_URL=http://telegram-bot-api:8081 — если пусто, используется api.telegram.org.
+BOT_API_URL = env.str("BOT_API_URL", default=None)
 
 COOKIE_FILE = "www.youtube.com_cookies.txt"
