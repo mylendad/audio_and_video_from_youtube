@@ -21,6 +21,11 @@ RUN useradd -u 10001 -m appuser
 COPY . .
 RUN chown -R appuser:appuser /app
 
-USER appuser
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Запуск через entrypoint от root: копирует SSH-ключ storage-сервера в /tmp
+# (appuser не может читать host-маунт), затем опускает права до appuser.
+ENTRYPOINT ["/entrypoint.sh"]
 
 CMD ["python", "main.py"]
