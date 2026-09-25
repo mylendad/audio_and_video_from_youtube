@@ -13,6 +13,8 @@ from ipaddress import ip_address, IPv4Address, IPv6Address, AddressValueError
 # import aiohttp
 
 from aiogram import Bot, F, types
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -32,18 +34,25 @@ from generate_cookies import export_youtube_cookies_to_txt
 from redis_lock import acquire_user_lock, release_user_lock
 from clients import AsyncUserActioner, AsyncPostgresClient, storage_client
 
-from config import TOKEN, ADMIN_CHAT_ID, ADMIN_USER_ID, DB_DSN, REQUIRED_CHANNELS, COOKIE_FILE, STORAGE_UPLOAD_ENABLED
+from config import TOKEN, ADMIN_CHAT_ID, ADMIN_USER_ID, DB_DSN, REQUIRED_CHANNELS, COOKIE_FILE, STORAGE_UPLOAD_ENABLED, BOT_API_URL
 from constants import FORMATS
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Лимит размера файла для прямой отправки (49 МБ для надежности)
+# Лимит размера файла для прямой отправки (49 МБ для надежности).
+# С локальным Telegram Bot API сервером (--local) лимит вырастает до ~2 ГБ.
 MAX_FILE_SIZE = 49 * 1024 * 1024
+DIRECT_SEND_LIMIT = int(1900 * 1024 * 1024) if BOT_API_URL else MAX_FILE_SIZE
 
 
-bot = Bot(token=TOKEN)
+if BOT_API_URL:
+    session = AiohttpSession(api=TelegramAPIServer.from_base(BOT_API_URL, is_local=True))
+    bot = Bot(token=TOKEN, session=session)
+    logger.info(f"Бот подключен к локальному Telegram Bot API: {BOT_API_URL}")
+else:
+    bot = Bot(token=TOKEN)
 
 db = AsyncPostgresClient(dsn=DB_DSN)
 user_actioner = AsyncUserActioner(db)
@@ -472,8 +481,8 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         file_size = os.path.getsize(final_path)
         logger.info(f"Финальный путь: {final_path}, размер: {file_size} байт")
 
-        if file_size <= MAX_FILE_SIZE:
-            logger.info("Файл меньше 50 МБ, отправка напрямую.")
+        if file_size <= DIRECT_SEND_LIMIT:
+            logger.info("Файл в пределах лимита прямой отправки, отправка напрямую.")
             fs_file = types.FSInputFile(final_path)
             if format_config['send_method'] == 'send_audio': # type: ignore[index]
                 await message.answer_audio(fs_file)
