@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
-from audio import process_download, DownloadState, ensure_user_exists, is_user_subscribed, send_subscription_request, estimate_video_size, format_size
+from audio import process_download, DownloadState, ensure_user_exists, is_user_subscribed, send_subscription_request, estimate_all_sizes, format_size
 from config import ADMIN_USER_ID, ADMIN_CHAT_ID
 from constants import FORMATS
 from generate_cookies import export_youtube_cookies_to_txt
@@ -140,26 +140,22 @@ async def handle_video_link(message: types.Message, state: FSMContext) -> None:
         await state.set_state(DownloadState.waiting_for_format)
         await state.update_data(last_url=message.text)
 
-        cached_sizes: dict[tuple[str, str], float] = {}
-
         response = "Выберите качество:\n\n"
-        for format_key, format_info_obj in FORMATS.items(): # Переименовал format_info в format_info_obj
-            assert message.text is not None # Гарантируем, что message.text не None
-            key = (message.text, format_key)
-            format_info: dict[str, Any] = format_info_obj # type: ignore[assignment] # Явно указываем тип
-            try:
-                if key in cached_sizes:
-                    size = cached_sizes[key]
-                else:
-                    size = await estimate_video_size(message.text, format_info)
-                    cached_sizes[key] = size
+        try:
+            sizes = await estimate_all_sizes(message.text)
+        except TelegramForbiddenError:
+            raise
+        except Exception as e:
+            logger.warning(f"Не удалось оценить размеры: {e}")
+            sizes = {}
 
-                if size > 0:
-                    size_str = format_size(int(size))
-                    response += f"/{format_key} - {size_str}\n"
-                else:
-                    response += f"/{format_key}\n"
-            except Exception as e:
+        for format_key in FORMATS:
+            size = sizes.get(format_key, 0)
+
+            if size > 0:
+                size_str = format_size(int(size))
+                response += f"/{format_key} - {size_str}\n"
+            else:
                 response += f"/{format_key}\n"
 
         builder = ReplyKeyboardBuilder()

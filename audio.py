@@ -127,42 +127,90 @@ def is_youtube_url(url: str) -> bool:
 
 DOWNLOAD_TIMEOUT_SECONDS = 600 # 10 минут на скачивание/извлечение информации
 
-async def estimate_video_size(url: str, format_config: dict) -> float:
+def cookie_file_option() -> dict:
+    """
+    Возвращает опции yt-dlp для cookie-файла только если он существует и доступен
+    для записи (yt-dlp записывает в него обновлённые куки и жёстко падает, если
+    файл не доступен для записи). Иначе работает анонимно.
+    """
+    if os.path.exists(COOKIE_FILE) and os.access(COOKIE_FILE, os.W_OK):
+        return {'cookiefile': COOKIE_FILE}
+    logger.warning(f"Cookie-файл {COOKIE_FILE} отсутствует или не доступен для записи, работаю без куки.")
+    return {}
+
+def format_estimated_size(f: dict) -> float:
+    """Оценка размера формата: filesize, иначе tbr * duration / 8."""
+    filesize = f.get('filesize') or f.get('filesize_approx')
+    if filesize:
+        return float(filesize)
+    tbr = f.get('tbr') or 0.0
+    duration = f.get('duration') or 1.0
+    return (tbr * 1000 * duration) / 8
+
+
+async def estimate_all_sizes(url: str) -> dict[str, float]:
+    """
+    Размеры ВСЕХ форматов за ОДИН extract_info (нужен размер:
+    без него каждый из 7 форматов гонял отдельный extract и триггерил
+    HTTP 403 / rate-limit).
+    """
     ydl_opts = {
         'quiet': True,
         'simulate': True,
-        'format': format_config['format'], # type: ignore[index]
-        'cookiefile': COOKIE_FILE,
+        'format': 'bestvideo+bestaudio/best',
+        **cookie_file_option(),
+        'extractor_args': {'youtube': ['player_client=web,android_vr']},
+        'retries': 2,
+        'fragment_retries': 2,
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'restrictfilenames': True, # Ограничение имен файлов
     }
-    
-    if 'postprocessors' in format_config:
-        ydl_opts['postprocessors'] = format_config['postprocessors']
 
     info: dict[str, Any] = {}
     try:
-        async with asyncio.timeout(DOWNLOAD_TIMEOUT_SECONDS): # Устанавливаем таймаут
+        async with asyncio.timeout(DOWNLOAD_TIMEOUT_SECONDS):
             with YoutubeDL(ydl_opts) as ydl: # type: ignore
-                info = await asyncio.to_thread(ydl.extract_info, url, download=False) # type: ignore
-            
-            if 'requested_downloads' in info and info['requested_downloads']:
-                filesize = info['requested_downloads'][0].get('filesize')
-                if filesize:
-                    return filesize
-                    
-            tbr: float = info.get('tbr') or 0.0 # type: ignore[assignment]
-            duration: float = info.get('duration') or 1.0 # type: ignore[assignment]
-            
-            estimated_size = (tbr * 1000 * duration) / 8
-            return estimated_size
-            
+                info = cast(dict[str, Any], await asyncio.to_thread(ydl.extract_info, url, download=False))
     except asyncio.TimeoutError:
-        logger.error(f"Таймаут операции оценки размера для URL: {url}")
-        return 0
+        logger.error(f"Таймаут оценки размера для URL: {url}")
+        return {}
     except Exception as e:
         logger.error(f"Ошибка оценки размера: {e}")
-        return 0
+        return {}
+
+    formats = info.get('formats') or []
+    duration = info.get('duration') or 1.0
+    for f in formats:
+        f.setdefault('duration', duration)
+
+    def is_audio(f: dict) -> bool:
+        return f.get('audio_ext') not in (None, 'none') or f.get('acodec') not in (None, 'none')
+
+    def is_video(f: dict) -> bool:
+        return f.get('video_ext') not in (None, 'none') or f.get('vcodec') not in (None, 'none')
+
+    def video_candidates() -> list[dict]:
+        return [f for f in formats if is_video(f) and not is_audio(f)]
+
+    def best_size(cands: list[dict]) -> float:
+        return max((format_estimated_size(f) for f in cands), default=0.0)
+
+    audio_cands = [f for f in formats if is_audio(f) and not is_video(f)]
+    audio_size = best_size(audio_cands)
+
+    sizes: dict[str, float] = {}
+    for key, cfg in FORMATS.items():
+        selector = cfg['format'] # type: ignore[index]
+        if 'bestvideo' in selector:
+            height_match = re.search(r'height<=(\d+)', selector)
+            height = int(height_match.group(1)) if height_match else 720
+            vids = [f for f in video_candidates() if (f.get('height') or 0) <= height]
+            video_size = best_size(vids)
+            fallback_size = best_size([f for f in formats if is_video(f)]) if not vids else 0.0
+            sizes[key] = video_size + (audio_size if video_size else fallback_size) # type: ignore[index]
+        else:
+            sizes[key] = audio_size  # type: ignore[index]
+    return sizes
 
 async def send_subscription_request(chat_id: int):
     """
@@ -353,7 +401,10 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
         'continuedl': True,
         'noprogress': True, 
         'verbose': False,
-        'cookiefile': COOKIE_FILE,
+        **cookie_file_option(),
+        'extractor_args': {'youtube': ['player_client=web,android_vr']},
+        'retries': 5,
+        'fragment_retries': 5,
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'progress_hooks': [progress_hook],
         'restrictfilenames': True, # Ограничение имен файлов
@@ -375,45 +426,45 @@ async def process_download(message: types.Message, format_key: str, state: FSMCo
 
         # url = None # Удаляем эту строку
         logger.info(f"Информация о видео: {info.get('title')}")
-            logger.info(f"Расширение: {info.get('ext')}")
-            if 'requested_downloads' in info and info['requested_downloads']: # type: ignore[index]
-                logger.info(f"Запрошенные загрузки: {info['requested_downloads'][0]}")
+        logger.info(f"Расширение: {info.get('ext')}")
+        if 'requested_downloads' in info and info['requested_downloads']: # type: ignore[index]
+            logger.info(f"Запрошенные загрузки: {info['requested_downloads'][0]}")
 
-            if 'postprocessors' in format_config: # type: ignore[operator]
-                ext = format_config['extension'] # type: ignore[index]
-                final_path = f"{base_filename}.{ext}"
-                
-                for i in range(15):
-                    if os.path.exists(final_path):
-                        break
-                    logger.info(f"Ожидание файла ({i+1}/15): {final_path}")
-                    await asyncio.sleep(1)
-                else:
-                    raise FileNotFoundError(f"Конвертированный файл не найден: {final_path}")
+        if 'postprocessors' in format_config: # type: ignore[operator]
+            ext = format_config['extension'] # type: ignore[index]
+            final_path = f"{base_filename}.{ext}"
+            
+            for i in range(15):
+                if os.path.exists(final_path):
+                    break
+                logger.info(f"Ожидание файла ({i+1}/15): {final_path}")
+                await asyncio.sleep(1)
             else:
-                ext = info.get('ext', 'mp4')
-                final_path = f"{base_filename}.{ext}"
+                raise FileNotFoundError(f"Конвертированный файл не найден: {final_path}")
+        else:
+            ext = info.get('ext', 'mp4')
+            final_path = f"{base_filename}.{ext}"
+            
+            if not os.path.exists(final_path):
+                candidates = glob.glob(f"{base_filename}*")
+                logger.info(f"Файл не найден, кандидаты: {candidates}")
                 
-                if not os.path.exists(final_path):
-                    candidates = glob.glob(f"{base_filename}*")
-                    logger.info(f"Файл не найден, кандидаты: {candidates}")
-                    
-                    filtered_candidates = [
-                        f for f in candidates 
-                        if not re.search(r'\.f\d+\.', f)
-                        and not f.endswith('.part')        
-                        and not f.endswith('.ytdl')                             ]
-                    
-                    logger.info(f"Отфильтрованные кандидаты: {filtered_candidates}")
-                    
-                    if filtered_candidates:
-                        filtered_candidates.sort(key=os.path.getmtime, reverse=True)
-                        final_path = filtered_candidates[0]
-                        logger.info(f"Выбран файл по дате изменения: {final_path}")
-                    
-                    if not os.path.exists(final_path) and candidates:
-                        final_path = candidates[0]
-                        logger.info(f"Выбран первый кандидат: {final_path}")
+                filtered_candidates = [
+                    f for f in candidates 
+                    if not re.search(r'\.f\d+\.', f)
+                    and not f.endswith('.part')        
+                    and not f.endswith('.ytdl')                             ]
+                
+                logger.info(f"Отфильтрованные кандидаты: {filtered_candidates}")
+                
+                if filtered_candidates:
+                    filtered_candidates.sort(key=os.path.getmtime, reverse=True)
+                    final_path = filtered_candidates[0]
+                    logger.info(f"Выбран файл по дате изменения: {final_path}")
+                
+                if not os.path.exists(final_path) and candidates:
+                    final_path = candidates[0]
+                    logger.info(f"Выбран первый кандидат: {final_path}")
 
         if not os.path.exists(final_path):
             raise FileNotFoundError(f"Файл не найден после скачивания: {final_path}")
